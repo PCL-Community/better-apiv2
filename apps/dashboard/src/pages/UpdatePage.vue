@@ -14,18 +14,17 @@
       </div>
     </div>
 
-    <mdui-select
-      class="min-w-56"
-      label="筛选渠道"
-      :value="selectedChannel"
-      @change="handleChannelChange"
-    >
-      <mdui-menu-item value="all">全部渠道</mdui-menu-item>
-      <mdui-menu-item value="frarm64">FR ARM64</mdui-menu-item>
-      <mdui-menu-item value="frx64">FR X64</mdui-menu-item>
-      <mdui-menu-item value="srarm64">SR ARM64</mdui-menu-item>
-      <mdui-menu-item value="srx64">SR X64</mdui-menu-item>
-    </mdui-select>
+    <div class="flex flex-nowrap gap-2 overflow-x-auto pb-2">
+      <mdui-chip
+        v-for="opt in channelOptions"
+        :key="opt.value"
+        selectable
+        variant="filter"
+        @click="selectChannel(opt.value)"
+      >
+        {{ opt.label }}
+      </mdui-chip>
+    </div>
 
     <div class="text-center py-12" v-if="isUpdatesLoading">
       <mdui-circular-progress indeterminate></mdui-circular-progress>
@@ -59,6 +58,10 @@
             </p>
             <p class="text-sm text-gray-600 break-all">
               SHA256: {{ update.sha256 || "未填写" }}
+            </p>
+            <p class="text-sm text-gray-600 break-all">
+              运行要求: .NET {{ update.required.dotnet }} | Windows OS 内部版本
+              {{ update.required.windows }}
             </p>
           </div>
 
@@ -156,9 +159,15 @@ import { useHead } from "@unhead/vue";
 
 type UpdateChannel = "frarm64" | "frx64" | "srarm64" | "srx64";
 
+type UpdateRequirements = {
+  dotnet: number;
+  windows: string;
+};
+
 type UpdateItem = {
   id: string;
   fileName: string;
+  required: UpdateRequirements;
   channel: UpdateChannel;
   versionName: string;
   versionCode: number;
@@ -172,6 +181,10 @@ type UpdateItem = {
 type UpdateAssetResponse = {
   id?: string;
   file_name?: string;
+  required?: {
+    dotnet?: number;
+    windows?: string;
+  };
   version?: {
     channel?: string;
     name?: string;
@@ -186,8 +199,7 @@ type UpdateAssetResponse = {
 };
 
 const pageSize = 8;
-const channelOptions: Array<{ value: "all" | UpdateChannel; label: string }> = [
-  { value: "all", label: "全部渠道" },
+const channelOptions: Array<{ value: UpdateChannel; label: string }> = [
   { value: "frarm64", label: "FR ARM64" },
   { value: "frx64", label: "FR X64" },
   { value: "srarm64", label: "SR ARM64" },
@@ -196,16 +208,37 @@ const channelOptions: Array<{ value: "all" | UpdateChannel; label: string }> = [
 
 const updates = ref<UpdateItem[]>([]);
 const isUpdatesLoading = ref(true);
-const selectedChannel = ref<"all" | UpdateChannel>("all");
+
+const selectedChannels = ref<UpdateChannel[]>([]);
+
+const selectedChannel = computed<"all" | UpdateChannel>({
+  get() {
+    return selectedChannels.value.length === 0
+      ? "all"
+      : selectedChannels.value[0];
+  },
+  set(next) {
+    if (next === "all") {
+      selectedChannels.value = [];
+    } else {
+      selectedChannels.value = [normalizeChannel(next)];
+    }
+  },
+});
+
 const currentPage = ref(1);
+const defaultRequirements: UpdateRequirements = {
+  dotnet: 8,
+  windows: "10.0.19045",
+};
 
 const filteredUpdates = computed(() => {
-  if (selectedChannel.value === "all") {
+  if (selectedChannels.value.length === 0) {
     return updates.value;
   }
 
-  return updates.value.filter(
-    (update) => update.channel === selectedChannel.value,
+  return updates.value.filter((update) =>
+    selectedChannels.value.includes(update.channel),
   );
 });
 
@@ -243,10 +276,18 @@ async function loadUpdates() {
 function normalizeUpdateAsset(asset: UpdateAssetResponse): UpdateItem {
   const version = asset.version ?? {};
   const channel = normalizeChannel(version.channel);
+  const required = asset.required ?? {};
 
   return {
     id: asset.id ?? crypto.randomUUID(),
     fileName: asset.file_name ?? "",
+    required: {
+      dotnet: Number.isInteger(required.dotnet)
+        ? (required.dotnet as number)
+        : defaultRequirements.dotnet,
+      windows:
+        String(required.windows ?? "").trim() || defaultRequirements.windows,
+    },
     channel,
     versionName: version.name ?? "",
     versionCode: version.code ?? 0,
@@ -279,9 +320,18 @@ function formatDate(date: string | Date) {
 function handleChannelChange(event: Event) {
   const target = event.target as { value?: string } | null;
   const nextValue = target?.value ?? "all";
+  selectedChannel.value = nextValue === "all" ? "all" : normalizeChannel(nextValue);
+  currentPage.value = 1;
+  syncCurrentPage();
+}
 
-  selectedChannel.value =
-    nextValue === "all" ? "all" : normalizeChannel(nextValue);
+function selectChannel(next: UpdateChannel) {
+  const idx = selectedChannels.value.indexOf(next);
+  if (idx >= 0) {
+    selectedChannels.value.splice(idx, 1);
+  } else {
+    selectedChannels.value.push(next);
+  }
   currentPage.value = 1;
   syncCurrentPage();
 }
@@ -333,6 +383,11 @@ function openUpdateDialog(initial?: UpdateItem) {
         <mdui-menu-item value="srx64">Release / 正式版 X64</mdui-menu-item>
       </mdui-select>
       <mdui-text-field required id="update-changelog" label="更新日志" helper="支持 Markdown" rows="4"></mdui-text-field>
+      <div class="space-y-2">
+        <p class="text-sm font-medium text-gray-700">运行要求</p>
+        <mdui-text-field required id="update-required-dotnet" type="number" label=".NET 版本" placeholder="8"></mdui-text-field>
+        <mdui-text-field required id="update-required-windows" label="Windows OS 内部版本" placeholder="17763"></mdui-text-field>
+      </div>
       <mdui-text-field id="update-source-group" label="下载源组" placeholder="cdn" helper="可选，用于多CDN镜像分发"></mdui-text-field>
     `
     : `
@@ -356,6 +411,11 @@ function openUpdateDialog(initial?: UpdateItem) {
         <mdui-menu-item value="srx64">Release / 正式版 X64</mdui-menu-item>
       </mdui-select>
       <mdui-text-field required id="update-changelog" label="更新日志" helper="支持 Markdown" rows="4"></mdui-text-field>
+      <div class="space-y-2">
+        <p class="text-sm font-medium text-gray-700">运行要求</p>
+        <mdui-text-field required id="update-required-dotnet" type="number" label=".NET 版本" placeholder="8"></mdui-text-field>
+        <mdui-text-field required id="update-required-windows" label="Windows OS 内部版本" placeholder="17763"></mdui-text-field>
+      </div>
       <mdui-text-field id="update-source-group" label="下载源组" placeholder="cdn" helper="可选，用于多 CDN 镜像分发"></mdui-text-field>
     `;
 
@@ -367,6 +427,12 @@ function openUpdateDialog(initial?: UpdateItem) {
   const versionCodeField = body.querySelector("#update-version-code") as any;
   const channelField = body.querySelector("#update-channel") as any;
   const changelogField = body.querySelector("#update-changelog") as any;
+  const requiredDotnetField = body.querySelector(
+    "#update-required-dotnet",
+  ) as any;
+  const requiredWindowsField = body.querySelector(
+    "#update-required-windows",
+  ) as any;
   const sourceGroupField = body.querySelector("#update-source-group") as any;
   let selectedFile: File | null = null;
 
@@ -377,6 +443,12 @@ function openUpdateDialog(initial?: UpdateItem) {
     : "";
   channelField.value = initial?.channel ?? "frarm64";
   changelogField.value = initial?.changelog ?? "";
+  requiredDotnetField.value = String(
+    (initial?.required ?? defaultRequirements).dotnet,
+  );
+  requiredWindowsField.value = (
+    initial?.required ?? defaultRequirements
+  ).windows;
   if (sourceGroupField)
     sourceGroupField.value = (initial as any)?.sourceGroup ?? "";
 
@@ -410,6 +482,10 @@ function openUpdateDialog(initial?: UpdateItem) {
             String(channelField.value ?? "frarm64"),
           );
           const changelog = String(changelogField.value ?? "").trim();
+          const requiredDotnet = Number(requiredDotnetField.value);
+          const requiredWindows = String(
+            requiredWindowsField.value ?? "",
+          ).trim();
           const sourceGroup = sourceGroupField
             ? String(sourceGroupField.value ?? "").trim()
             : "";
@@ -418,7 +494,10 @@ function openUpdateDialog(initial?: UpdateItem) {
             !fileName ||
             !versionName ||
             Number.isNaN(versionCode) ||
-            !changelog
+            !changelog ||
+            !Number.isInteger(requiredDotnet) ||
+            requiredDotnet <= 0 ||
+            !requiredWindows
           ) {
             return false;
           }
@@ -436,6 +515,10 @@ function openUpdateDialog(initial?: UpdateItem) {
                 version_code: versionCode,
                 changelog,
                 source_group: sourceGroup || undefined,
+                required: {
+                  dotnet: requiredDotnet,
+                  windows: requiredWindows,
+                },
               });
             } else {
               await uploadUpdate({
@@ -448,6 +531,10 @@ function openUpdateDialog(initial?: UpdateItem) {
                 },
                 changelog,
                 source_group: sourceGroup || undefined,
+                required: {
+                  dotnet: requiredDotnet,
+                  windows: requiredWindows,
+                },
               });
             }
 
@@ -505,13 +592,27 @@ function openBatchDialog() {
     <mdui-text-field required id="batch-version-name" label="版本名称" placeholder="2.14.5-beta.1.2147483647"></mdui-text-field>
     <mdui-text-field required id="batch-version-code" type="number" label="版本号" placeholder="510"></mdui-text-field>
     <mdui-text-field required id="batch-changelog" label="更新日志" helper="支持 Markdown" rows="4"></mdui-text-field>
+    <div class="space-y-2">
+      <p class="text-sm font-medium text-gray-700">运行要求</p>
+      <mdui-text-field required id="batch-required-dotnet" type="number" label=".NET 版本" placeholder="8"></mdui-text-field>
+      <mdui-text-field required id="batch-required-windows" label="Windows 版本" placeholder="10.0.19045"></mdui-text-field>
+    </div>
     <mdui-text-field id="batch-source-group" label="下载源组" placeholder="cdn" helper="可选，用于多CDN镜像分发"></mdui-text-field>
   `;
 
   const versionNameField = body.querySelector("#batch-version-name") as any;
   const versionCodeField = body.querySelector("#batch-version-code") as any;
   const changelogField = body.querySelector("#batch-changelog") as any;
+  const requiredDotnetField = body.querySelector(
+    "#batch-required-dotnet",
+  ) as any;
+  const requiredWindowsField = body.querySelector(
+    "#batch-required-windows",
+  ) as any;
   const sourceGroupField = body.querySelector("#batch-source-group") as any;
+
+  requiredDotnetField.value = String(defaultRequirements.dotnet);
+  requiredWindowsField.value = defaultRequirements.windows;
 
   const fileInputs: HTMLInputElement[] = channelConfigs.map(
     (cfg) =>
@@ -533,9 +634,20 @@ function openBatchDialog() {
           const versionName = String(versionNameField.value ?? "").trim();
           const versionCode = Number(versionCodeField.value);
           const changelog = String(changelogField.value ?? "").trim();
+          const requiredDotnet = Number(requiredDotnetField.value);
+          const requiredWindows = String(
+            requiredWindowsField.value ?? "",
+          ).trim();
           const sourceGroup = String(sourceGroupField.value ?? "").trim();
 
-          if (!versionName || Number.isNaN(versionCode) || !changelog) {
+          if (
+            !versionName ||
+            Number.isNaN(versionCode) ||
+            !changelog ||
+            !Number.isInteger(requiredDotnet) ||
+            requiredDotnet <= 0 ||
+            !requiredWindows
+          ) {
             return false;
           }
 
@@ -559,6 +671,10 @@ function openBatchDialog() {
               version_code: versionCode,
               changelog,
               source_group: sourceGroup || undefined,
+              required: {
+                dotnet: requiredDotnet,
+                windows: requiredWindows,
+              },
             });
 
             await loadUpdates();

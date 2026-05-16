@@ -19,6 +19,17 @@ function normalizeAnnouncementBody(body: any) {
   }
 }
 
+function normalizeRequiredBody(body: any) {
+  const required = body.required ?? {}
+  const dotnet = Number(body.required_dotnet ?? required.dotnet)
+  const windows = String(body.required_windows ?? required.windows ?? '').trim()
+
+  return {
+    dotnet,
+    windows,
+  }
+}
+
 export const adminRoutes = new Elysia({ prefix: '/admin' })
   .get('/me', async ({ headers, set }) => {
     const authResult = await requireAdminByAuthorizationHeader(headers.authorization)
@@ -99,6 +110,10 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
       const versionCode = Number(formData.get('version_code'))
       const changelog = String(formData.get('changelog') ?? '').trim()
       const sourceGroup = String(formData.get('source_group') ?? '').trim()
+      const required = {
+        dotnet: Number(formData.get('required_dotnet')),
+        windows: String(formData.get('required_windows') ?? '').trim(),
+      }
 
       if (!(file instanceof File)) {
         set.status = 400
@@ -114,6 +129,7 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
         ...(sourceGroup ? { sourceGroup } : {}),
         changelog,
         uploadedByAdmin: authResult.login,
+        required,
       })
       return { success: true, data: result }
     } catch (error) {
@@ -135,6 +151,10 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
       const versionCode = Number(formData.get('version_code'))
       const changelog = String(formData.get('changelog') ?? '').trim()
       const sourceGroup = String(formData.get('source_group') ?? '').trim()
+      const required = {
+        dotnet: Number(formData.get('required_dotnet')),
+        windows: String(formData.get('required_windows') ?? '').trim(),
+      }
 
       // Collect files and their channels from form data.
       // Each file field is named like "file_frarm64", "file_frx64", etc.
@@ -160,6 +180,7 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
         ...(sourceGroup ? { sourceGroup } : {}),
         changelog,
         uploadedByAdmin: authResult.login,
+        required,
         fileChannels,
       })
       return { success: true, data: results }
@@ -184,6 +205,7 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
         versionCode: Number(body.version_code),
         sourceGroup: body.source_group,
         changelog: body.changelog,
+        required: normalizeRequiredBody(body),
       })
       return { success: true, data: result }
     } catch (error) {

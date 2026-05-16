@@ -24,7 +24,7 @@ function getBaseUrl(request: Request): string {
 }
 
 export const updateRoutes = new Elysia({ prefix: '/apiv2' })
-  // ── v2 API: /apiv2/updates/cache.json ──────────────────────────────────
+  // ── v2 API: /apiv2/cache.json ──────────────────────────────────
   .get('/cache.json', async ({ request }) => {
     try {
       return await UpdateService.computeCache(getBaseUrl(request))

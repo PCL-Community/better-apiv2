@@ -56,6 +56,10 @@ export type UpdateChannel = 'frarm64' | 'frx64' | 'srarm64' | 'srx64'
 export interface UpdateAssetItem {
   id: string
   fileName: string
+  required: {
+    dotnet: number
+    windows: string
+  }
   channel: UpdateChannel
   versionName: string
   versionCode: number
@@ -69,6 +73,10 @@ export interface UpdateAssetItem {
 export interface UpdateAssetResponse {
   id?: string
   file_name?: string
+  required?: {
+    dotnet?: number
+    windows?: string
+  }
   version?: {
     channel?: string
     name?: string

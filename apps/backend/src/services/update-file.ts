@@ -8,6 +8,7 @@ import type { Prisma } from "../../generated/prisma/client";
 import { storageService } from "./object-storage";
 import type {
   UpdateAsset,
+  UpdateRequirements,
   UpdatesResponse,
   CacheResponse,
   ReleaseSourceConfig,
@@ -26,6 +27,7 @@ type CreateUpdateInput = {
   sourceGroup?: string;
   changelog: string;
   uploadedByAdmin: string;
+  required: UpdateRequirements;
 };
 
 type UpdateMetadataInput = {
@@ -35,6 +37,7 @@ type UpdateMetadataInput = {
   versionCode: number;
   sourceGroup?: string;
   changelog: string;
+  required: UpdateRequirements;
 };
 
 type BatchReleaseInput = {
@@ -43,6 +46,7 @@ type BatchReleaseInput = {
   sourceGroup?: string
   changelog: string
   uploadedByAdmin: string
+  required: UpdateRequirements
   fileChannels: { file: File; channel: string }[]
 };
 
@@ -123,6 +127,24 @@ function hashBuffer(buffer: Buffer) {
 
 function md5Hash(content: string) {
   return crypto.createHash("md5").update(content, "utf-8").digest("hex");
+}
+
+function normalizeRequirements(input: UpdateRequirements): UpdateRequirements {
+  const dotnet = Number(input.dotnet);
+  const windows = String(input.windows ?? "").trim();
+
+  if (!Number.isInteger(dotnet) || dotnet <= 0) {
+    throw new Error("Missing required .NET version");
+  }
+
+  if (!windows) {
+    throw new Error("Missing required Windows version");
+  }
+
+  return {
+    dotnet,
+    windows,
+  };
 }
 
 function joinUrl(baseUrl: string | undefined, routePath: string) {
@@ -342,6 +364,10 @@ export class UpdateService {
         return {
           id: asset.id,
           file_name: asset.fileName,
+          required: {
+            dotnet: asset.requiredDotnet,
+            windows: asset.requiredWindows,
+          },
           version: {
             channel: channelLabel,
             name: asset.versionName,
@@ -399,6 +425,10 @@ export class UpdateService {
         return {
           id: asset.id,
           file_name: asset.fileName,
+          required: {
+            dotnet: asset.requiredDotnet,
+            windows: asset.requiredWindows,
+          },
           version: {
             channel: channelLabel,
             name: asset.versionName,
@@ -467,6 +497,7 @@ export class UpdateService {
 
     const versionName = input.versionName.trim();
     const changelog = input.changelog.trim();
+    const required = normalizeRequirements(input.required);
     if (!versionName) throw new Error("Missing version name");
 
     const fileBuffer = await toBuffer(input.file);
@@ -501,6 +532,8 @@ export class UpdateService {
         channel: channelMap[channel],
         versionName,
         versionCode: input.versionCode,
+        requiredDotnet: required.dotnet,
+        requiredWindows: required.windows,
         originalName: input.file.name,
         fileSize: fileBuffer.length,
         sha256,
@@ -547,6 +580,7 @@ export class UpdateService {
    */
   static async batchRelease(input: BatchReleaseInput) {
     const results: Awaited<ReturnType<typeof prisma.updateFile.create>>[] = [];
+    const required = normalizeRequirements(input.required);
 
     for (const { file, channel } of input.fileChannels) {
       const normalized = normalizeChannel(channel);
@@ -559,6 +593,7 @@ export class UpdateService {
         ...(input.sourceGroup ? { sourceGroup: input.sourceGroup } : {}),
         changelog: input.changelog,
         uploadedByAdmin: input.uploadedByAdmin,
+        required,
       });
       results.push(result);
     }
@@ -570,6 +605,7 @@ export class UpdateService {
 
   static async updateMetadata(id: string, input: UpdateMetadataInput) {
     const channel = normalizeChannel(input.channel);
+    const required = normalizeRequirements(input.required);
     return prisma.updateFile.update({
       where: { id },
       data: {
@@ -577,6 +613,8 @@ export class UpdateService {
         channel: channelMap[channel],
         versionName: input.versionName.trim(),
         versionCode: input.versionCode,
+        requiredDotnet: required.dotnet,
+        requiredWindows: required.windows,
         sourceGroup: input.sourceGroup?.trim() ?? null,
         changelog: input.changelog.trim(),
       },

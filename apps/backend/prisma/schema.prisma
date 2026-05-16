@@ -69,6 +69,8 @@ model UpdateFile {
   channel         VersionChannel
   versionName     String
   versionCode     Int              
+  requiredDotnet  Int              @default(8)
+  requiredWindows String           @default("10.0.19045")
   originalName    String
   fileSize        Int
   sha256          String           

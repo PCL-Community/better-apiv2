@@ -226,6 +226,10 @@ export async function uploadUpdate(data: {
   }
   changelog: string
   source_group?: string
+  required: {
+    dotnet: number
+    windows: string
+  }
 }) {
   const authStore = useAuthStore()
   if (!authStore.token) {
@@ -239,6 +243,8 @@ export async function uploadUpdate(data: {
   formData.append('version_name', data.version.name)
   formData.append('version_code', String(data.version.code))
   formData.append('changelog', data.changelog)
+  formData.append('required_dotnet', String(data.required.dotnet))
+  formData.append('required_windows', data.required.windows)
   if (data.source_group) {
     formData.append('source_group', data.source_group)
   }
@@ -266,6 +272,10 @@ export async function batchUploadUpdates(data: {
   version_code: number
   changelog: string
   source_group?: string
+  required: {
+    dotnet: number
+    windows: string
+  }
 }) {
   const authStore = useAuthStore()
   if (!authStore.token) {
@@ -279,6 +289,8 @@ export async function batchUploadUpdates(data: {
   formData.append('version_name', data.version_name)
   formData.append('version_code', String(data.version_code))
   formData.append('changelog', data.changelog)
+  formData.append('required_dotnet', String(data.required.dotnet))
+  formData.append('required_windows', data.required.windows)
   if (data.source_group) {
     formData.append('source_group', data.source_group)
   }
@@ -307,6 +319,10 @@ export async function updateUpdate(id: string, data: {
   version_code: number
   changelog: string
   source_group?: string
+  required: {
+    dotnet: number
+    windows: string
+  }
 }) {
   const authStore = useAuthStore()
   if (!authStore.token) {
@@ -320,6 +336,7 @@ export async function updateUpdate(id: string, data: {
     version_code: data.version_code,
     changelog: data.changelog,
     source_group: data.source_group ?? null,
+    required: data.required,
   }, {
     headers: getAuthHeaders(authStore.token),
   })
