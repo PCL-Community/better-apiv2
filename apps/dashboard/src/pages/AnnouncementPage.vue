@@ -14,7 +14,7 @@
     </div>
 
     <div class="text-center py-12" v-else-if="announcements.length === 0">
-      <mdui-icon-comments-disabled--outlined></mdui-icon-comments-disabled--outlined>
+      <mdui-icon-comments-disabled--outlined class="w-16 h-16"></mdui-icon-comments-disabled--outlined>
       <p class="text-sm text-gray-500">没有公告</p>
     </div>
 
@@ -280,11 +280,11 @@ function createAnnouncementDialogBody(initial?: AnnouncementItem) {
   const initialButton2 = normalizeButton(initial?.buttons?.[1]);
 
   button1TextField.value = initialButton1?.text ?? "";
-  button1ExecField.value = initialButton1?.exec ?? "OpenWebSite";
+  button1ExecField.value = initialButton1?.exec ?? "";
   button1ArgumentField.value = initialButton1?.argument ?? "";
 
   button2TextField.value = initialButton2?.text ?? "";
-  button2ExecField.value = initialButton2?.exec ?? "OpenWebSite";
+  button2ExecField.value = initialButton2?.exec ?? "";
   button2ArgumentField.value = initialButton2?.argument ?? "";
 
   return {
