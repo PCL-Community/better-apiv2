@@ -160,13 +160,26 @@ export const staticRoutes = new Elysia()
         return { success: false, error: '文件名格式错误' }
       }
 
-      const s3Url = await UpdateService.getPatchS3UrlBySha256(oldSha256, newSha256)
-      if (!s3Url) {
+      const redirectUrl = await UpdateService.getPatchRedirectUrlBySha256(oldSha256, newSha256)
+      if (redirectUrl) {
+        return Response.redirect(redirectUrl, 302)
+      }
+
+      const patchInfo = await UpdateService.getPatchDownloadInfoBySha256(oldSha256, newSha256)
+      if (!patchInfo || !patchInfo.filePath) {
         set.status = 404
         return { success: false, error: '补丁文件不存在' }
       }
 
-      return Response.redirect(s3Url, 302)
+      const file = Bun.file(patchInfo.filePath)
+      if (!(await file.exists())) {
+        set.status = 404
+        return { success: false, error: '补丁文件不存在' }
+      }
+
+      set.headers['content-type'] = 'application/octet-stream'
+      set.headers['content-disposition'] = `attachment; filename="${patchInfo.fileName}"`
+      return new Response(file)
     } catch (error) {
       console.error('获取补丁下载地址失败:', error)
       set.status = 500
