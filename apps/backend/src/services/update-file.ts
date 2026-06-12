@@ -28,6 +28,7 @@ type CreateUpdateInput = {
   changelog: string;
   uploadedByAdmin: string;
   required: UpdateRequirements;
+  skipChannelDetection?: boolean;
 };
 
 type UpdateMetadataInput = {
@@ -276,6 +277,20 @@ export class ReleaseSourceService {
       (s) => `${s.baseUrl.replace(/\/+$/, "")}/static/raw/${sha256}.zip`,
     );
   }
+
+  /** Get patch download URLs for a source group */
+  static async getPatchDownloadUrls(
+    filename: string,
+    groupName: string,
+  ): Promise<string[]> {
+    const sources = await prisma.releaseSource.findMany({
+      where: { groupName, enabled: true },
+    });
+    if (sources.length === 0) return [];
+    return sources.map(
+      (s) => `${s.baseUrl.replace(/\/+$/, "")}/static/patch/${filename}`,
+    );
+  }
 }
 
 // ─── UpdateService ──────────────────────────────────────────────────────────
@@ -491,7 +506,11 @@ export class UpdateService {
     // Auto-detect channel from filename if not explicitly provided or unclear
     let channel = normalizeChannel(input.channel);
     const detected = this.detectChannel(fileName);
-    if (detected && (!input.channel || input.channel === "frarm64")) {
+    if (
+      !input.skipChannelDetection &&
+      detected &&
+      (!input.channel || input.channel === "frarm64")
+    ) {
       channel = detected;
     }
 
@@ -517,10 +536,10 @@ export class UpdateService {
     const existing = await prisma.updateFile.findFirst({
       where: {
         channel: channelMap[channel],
-        fileName,
+        versionCode: input.versionCode,
       },
     });
-    if (existing) throw new Error("Update file already exists");
+    if (existing) throw new Error("Update version already exists");
 
     const stored = await storageService.uploadBuffer(s3Key, zipBuffer, {
       contentType: "application/zip",
@@ -594,6 +613,7 @@ export class UpdateService {
         changelog: input.changelog,
         uploadedByAdmin: input.uploadedByAdmin,
         required,
+        skipChannelDetection: true,
       });
       results.push(result);
     }
@@ -866,6 +886,21 @@ export class UpdateService {
     };
   }
 
+  static async getPatchDownloadInfoBySha256(oldSha256: string, newSha256: string) {
+    const patchFile = await prisma.patchFile.findFirst({
+      where: {
+        fromUpdateFile: { sha256: oldSha256 },
+        toUpdateFile: { sha256: newSha256 },
+      },
+      include: { fromUpdateFile: true },
+    });
+    if (!patchFile) return null;
+    return {
+      filePath: storageService.getLocalPath(patchFile.s3Key),
+      fileName: `${patchFile.fromUpdateFile.sha256}_${patchFile.patchSha256.slice(0, 16)}.patch`,
+    };
+  }
+
   static async getPatchS3UrlBySha256(oldSha256: string, newSha256: string) {
     const patchFile = await prisma.patchFile.findFirst({
       where: {
@@ -875,5 +910,39 @@ export class UpdateService {
       select: { s3Url: true },
     });
     return patchFile?.s3Url || null;
+  }
+
+  static async getPatchRedirectUrlBySha256(oldSha256: string, newSha256: string): Promise<string | null> {
+    const patchFile = await prisma.patchFile.findFirst({
+      where: {
+        fromUpdateFile: { sha256: oldSha256 },
+        toUpdateFile: { sha256: newSha256 },
+      },
+      include: {
+        fromUpdateFile: { select: { sourceGroup: true } },
+        toUpdateFile: { select: { sourceGroup: true } },
+      },
+    });
+    if (!patchFile) return null;
+
+    const groupName = patchFile.toUpdateFile.sourceGroup ?? patchFile.fromUpdateFile.sourceGroup;
+    if (groupName) {
+      const filename = `${oldSha256}_${newSha256}.patch`;
+      const mirrorUrls = await ReleaseSourceService.getPatchDownloadUrls(filename, groupName);
+      if (mirrorUrls.length > 0) {
+        return mirrorUrls[Math.floor(Math.random() * mirrorUrls.length)] ?? null;
+      }
+    }
+
+    if (patchFile.s3Url.startsWith("http")) {
+      return patchFile.s3Url;
+    }
+
+    const { API_URL } = process.env;
+    if (API_URL && patchFile.s3Url.startsWith("/")) {
+      return `${API_URL.replace(/\/+$/, "")}${patchFile.s3Url}`;
+    }
+
+    return null;
   }
 }
