@@ -60,6 +60,18 @@ function normalizeSkip(skip: unknown): AnnouncementSkip | null {
   }
 }
 
+function normalizeExecValue(exec: string | undefined): string {
+  const value = String(exec ?? '').trim()
+
+  if (!value) {
+    return 'OpenWebsite'
+  }
+
+  return value === 'OpenWebSite' || value === 'OPEN_URL' || value === 'OPEN_WEBPAGE'
+    ? 'OpenWebsite'
+    : value
+}
+
 function normalizeButton(button: unknown): AnnouncementButton | null {
   if (!button || typeof button !== 'object') {
     return null
@@ -90,7 +102,7 @@ function normalizeButton(button: unknown): AnnouncementButton | null {
 
   return {
     text,
-    exec: exec || 'OpenWebSite',
+    exec: normalizeExecValue(exec),
     argument,
   }
 }
@@ -102,7 +114,7 @@ function mapLegacyButton(button?: { text: string; command: string; commandParame
 
   return {
     text: button.text,
-    exec: button.command === 'OPEN_URL' || button.command === 'OPEN_WEBPAGE' ? 'OpenWebSite' : button.command,
+    exec: normalizeExecValue(button.command === 'OPEN_URL' || button.command === 'OPEN_WEBPAGE' ? 'OpenWebsite' : button.command),
     argument: button.commandParameter,
   }
 }
