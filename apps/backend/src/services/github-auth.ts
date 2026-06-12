@@ -22,6 +22,45 @@ function getRequiredEnv(name: string): string {
   return value
 }
 
+function getGithubProxyUrl(): string | undefined {
+  const rawValue =
+    process.env.GITHUB_PROXY ??
+    process.env.HTTPS_PROXY ??
+    process.env.https_proxy ??
+    process.env.HTTP_PROXY ??
+    process.env.http_proxy ??
+    process.env.ALL_PROXY ??
+    process.env.all_proxy
+
+  const proxyUrl = rawValue?.trim()
+  if (!proxyUrl) {
+    return undefined
+  }
+
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(proxyUrl)) {
+    return proxyUrl
+  }
+
+  return `http://${proxyUrl}`
+}
+
+function createGithubFetchInit(init: RequestInit = {}): RequestInit & { proxy?: string } {
+  const proxy = getGithubProxyUrl()
+
+  if (!proxy) {
+    return init
+  }
+
+  return {
+    ...init,
+    proxy,
+  }
+}
+
+async function githubFetch(input: string, init: RequestInit = {}) {
+  return fetch(input, createGithubFetchInit(init))
+}
+
 export function getGithubOAuthLoginUrl(state: string): string {
   const clientId = getRequiredEnv('GITHUB_CLIENT_ID')
   const redirectUri = getRequiredEnv('GITHUB_REDIRECT_URI')
@@ -41,7 +80,7 @@ export async function exchangeCodeForAccessToken(code: string): Promise<string> 
   const clientSecret = getRequiredEnv('GITHUB_CLIENT_SECRET')
   const redirectUri = getRequiredEnv('GITHUB_REDIRECT_URI')
 
-  const response = await fetch(`${GITHUB_OAUTH_BASE}/access_token`, {
+  const response = await githubFetch(`${GITHUB_OAUTH_BASE}/access_token`, {
     method: 'POST',
     headers: {
       Accept: 'application/json',
@@ -69,7 +108,7 @@ export async function exchangeCodeForAccessToken(code: string): Promise<string> 
 }
 
 export async function fetchGithubUserProfile(accessToken: string): Promise<GithubUserProfile> {
-  const response = await fetch(`${GITHUB_API_BASE}/user`, {
+  const response = await githubFetch(`${GITHUB_API_BASE}/user`, {
     headers: {
       Accept: 'application/vnd.github+json',
       Authorization: `Bearer ${accessToken}`,
@@ -89,7 +128,7 @@ export async function checkGithubTeamMembership(accessToken: string): Promise<bo
   const org = process.env.GITHUB_ORG || 'PCL-Community'
   const teamSlug = process.env.GITHUB_TEAM_SLUG || 'ce-dev'
 
-  const response = await fetch(
+  const response = await githubFetch(
     `${GITHUB_API_BASE}/orgs/${encodeURIComponent(org)}/teams/${encodeURIComponent(teamSlug)}/memberships/${encodeURIComponent((await fetchGithubUserProfile(accessToken)).login)}`,
     {
       headers: {
