@@ -59,7 +59,7 @@ function toggleDrawer() {
 }
 
 async function handleLogout() {
-  logout()
+  await logout()
   if (isClient) {
     window.location.href = '/login'
   }
