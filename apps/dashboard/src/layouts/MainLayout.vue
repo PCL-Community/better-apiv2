@@ -3,7 +3,7 @@
     <TopNav @toggle-drawer="sideNav?.toggleDrawer()" />
     <SideNav ref="sideNav" />
     <main class="flex-1 w-full">
-      <div class="p-4 lg:p-8 max-w-230 mx-auto">
+      <div class="p-4 lg:p-8 max-w-230 mx-auto mb-26">
         <router-view />
       </div>
       <BackToTop />
