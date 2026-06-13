@@ -211,21 +211,6 @@ const isUpdatesLoading = ref(true);
 
 const selectedChannels = ref<UpdateChannel[]>([]);
 
-const selectedChannel = computed<"all" | UpdateChannel>({
-  get() {
-    return selectedChannels.value.length === 0
-      ? "all"
-      : selectedChannels.value[0];
-  },
-  set(next) {
-    if (next === "all") {
-      selectedChannels.value = [];
-    } else {
-      selectedChannels.value = [normalizeChannel(next)];
-    }
-  },
-});
-
 const currentPage = ref(1);
 const defaultRequirements: UpdateRequirements = {
   dotnet: 8,
@@ -317,14 +302,6 @@ function formatDate(date: string | Date) {
   return new Date(date).toLocaleDateString("zh-CN");
 }
 
-function handleChannelChange(event: Event) {
-  const target = event.target as { value?: string } | null;
-  const nextValue = target?.value ?? "all";
-  selectedChannel.value = nextValue === "all" ? "all" : normalizeChannel(nextValue);
-  currentPage.value = 1;
-  syncCurrentPage();
-}
-
 function selectChannel(next: UpdateChannel) {
   const idx = selectedChannels.value.indexOf(next);
   if (idx >= 0) {
@@ -384,7 +361,7 @@ function openUpdateDialog(initial?: UpdateItem) {
       </mdui-select>
       <mdui-text-field required id="update-changelog" label="更新日志" helper="支持 Markdown" rows="4"></mdui-text-field>
       <div class="space-y-2">
-        <p class="text-sm font-medium text-gray-700">运行要求</p>
+        <p class="text-sm font-medium">运行要求</p>
         <mdui-text-field required id="update-required-dotnet" type="number" label=".NET 版本" placeholder="8"></mdui-text-field>
         <mdui-text-field required id="update-required-windows" label="Windows OS 内部版本" placeholder="17763"></mdui-text-field>
       </div>
@@ -399,7 +376,7 @@ function openUpdateDialog(initial?: UpdateItem) {
           accept=".exe,.zip,application/octet-stream"
           class="block w-full text-sm"
         />
-        <p class="text-xs text-gray-500">请选择完整 EXE 文件。</p>
+        <p class="text-xs">请选择完整 EXE 文件。</p>
       </div>
       <mdui-text-field required id="update-file-name" label="文件名" placeholder="PCL2_CE_Beta_x64.exe"></mdui-text-field>
       <mdui-text-field required id="update-version-name" label="版本名称" placeholder="2.14.5-beta.1.2147483647"></mdui-text-field>
@@ -412,7 +389,7 @@ function openUpdateDialog(initial?: UpdateItem) {
       </mdui-select>
       <mdui-text-field required id="update-changelog" label="更新日志" helper="支持 Markdown" rows="4"></mdui-text-field>
       <div class="space-y-2">
-        <p class="text-sm font-medium text-gray-700">运行要求</p>
+        <p class="text-sm font-medium">运行要求</p>
         <mdui-text-field required id="update-required-dotnet" type="number" label=".NET 版本" placeholder="8"></mdui-text-field>
         <mdui-text-field required id="update-required-windows" label="Windows OS 内部版本" placeholder="17763"></mdui-text-field>
       </div>
@@ -571,7 +548,7 @@ function openBatchDialog() {
   ];
 
   body.innerHTML = `
-    <p class="text-sm text-gray-500">一次上传多个文件，每个文件必须放入对应通道的输入框。</p>
+    <p class="text-sm">一次上传多个文件，每个文件必须放入对应通道的输入框。</p>
     <mdui-divider></mdui-divider>
     ${channelConfigs
       .map(
@@ -593,7 +570,7 @@ function openBatchDialog() {
     <mdui-text-field required id="batch-version-code" type="number" label="版本号" placeholder="510"></mdui-text-field>
     <mdui-text-field required id="batch-changelog" label="更新日志" helper="支持 Markdown" rows="4"></mdui-text-field>
     <div class="space-y-2">
-      <p class="text-sm font-medium text-gray-700">运行要求</p>
+      <p class="text-sm font-medium">运行要求</p>
       <mdui-text-field required id="batch-required-dotnet" type="number" label=".NET 版本" placeholder="8"></mdui-text-field>
       <mdui-text-field required id="batch-required-windows" label="Windows 版本" placeholder="10.0.19045"></mdui-text-field>
     </div>
@@ -695,13 +672,6 @@ function openBatchDialog() {
 }
 
 function confirmDeleteUpdate(update: UpdateItem) {
-  const body = document.createElement("div");
-  body.className = "space-y-2 py-2";
-  body.innerHTML = `
-    <p>确定要删除这个更新吗？</p>
-    <p class="text-sm text-gray-500 break-all">${update.versionName} · ${update.fileName}</p>
-  `;
-
   confirm({
     headline: "删除更新",
     description: `确定要删除 ${update.channel} 通道的更新 "${update.versionName}" 吗？此操作无法撤销。`,
