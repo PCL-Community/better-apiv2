@@ -1,3 +1,8 @@
+export interface UpdateRequirements {
+  dotnet: number
+  windows: string
+}
+
 export interface Version {
   channel: 'frarm64' | 'frx64' | 'srarm64' | 'srx64'
   name: string
@@ -7,6 +12,7 @@ export interface Version {
 export interface UpdateAsset {
   id: string
   file_name: string
+  required: UpdateRequirements
   version: Version
   upd_time: string
   downloads: string[]

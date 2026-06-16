@@ -14,7 +14,7 @@
     </div>
 
     <div class="text-center py-12" v-else-if="announcements.length === 0">
-      <mdui-icon-comments-disabled--outlined></mdui-icon-comments-disabled--outlined>
+      <mdui-icon-comments-disabled--outlined class="w-16 h-16"></mdui-icon-comments-disabled--outlined>
       <p class="text-sm text-gray-500">没有公告</p>
     </div>
 
@@ -168,15 +168,49 @@ function editAnnouncement(announcement: AnnouncementItem) {
   openAnnouncementDialog(announcement);
 }
 
+function normalizeExec(exec?: string | null) {
+  const rawExec = String(exec ?? "").trim();
+
+  if (!rawExec) {
+    return "OpenWebsite";
+  }
+
+  if (
+    rawExec === "OpenWebSite" ||
+    rawExec === "OPEN_URL" ||
+    rawExec === "OPEN_WEBPAGE"
+  ) {
+    return "OpenWebsite";
+  }
+
+  return rawExec;
+}
+
+function getButtonActionValue(button?: AnnouncementButtonResponse | null) {
+  if (!button?.text && !button?.exec && !button?.argument) {
+    return "None";
+  }
+
+  return normalizeExec(button.exec);
+}
+
 function normalizeButton(
   button?: AnnouncementButtonResponse | null,
 ): AnnouncementButtonResponse | null {
   if (!button) return null;
 
+  const text = String(button.text ?? "").trim();
+  const exec = String(button.exec ?? "").trim();
+  const argument = String(button.argument ?? "").trim();
+
+  if (!text && !exec && !argument) {
+    return null;
+  }
+
   return {
-    text: button.text ?? "",
-    exec: button.exec ?? "OpenWebSite",
-    argument: button.argument ?? "",
+    text,
+    exec: normalizeExec(exec || "OpenWebsite"),
+    argument,
   };
 }
 
@@ -221,15 +255,29 @@ function createAnnouncementDialogBody(initial?: AnnouncementItem) {
     <div class="mt-2 space-y-4">
       <label class="block text-sm font-medium mb-1">按钮 1（可选）</label>
       <mdui-text-field id="announcement-button1-text" label="按钮文字"></mdui-text-field>
-      <mdui-text-field id="announcement-button1-exec" label="执行动作"></mdui-text-field>
-      <mdui-text-field id="announcement-button1-argument" label="参数"></mdui-text-field>
+      <mdui-select id="announcement-button1-exec" label="执行动作">
+        <mdui-menu-item value="None">不设置按钮</mdui-menu-item>
+        <mdui-menu-item value="OpenWebsite">OpenWebsite</mdui-menu-item>
+        <mdui-menu-item value="StopShow">StopShow</mdui-menu-item>
+      </mdui-select>
+      <div id="announcement-button1-argument-wrapper" class="space-y-1">
+        <mdui-text-field id="announcement-button1-argument" label="参数"></mdui-text-field>
+        <p class="text-xs text-gray-500">OpenWebsite 需要填写参数；StopShow 会自动使用当前公告 UUID。</p>
+      </div>
     </div>
 
     <div class="mt-2 space-y-4">
       <label class="block text-sm font-medium mb-1">按钮 2（可选）</label>
       <mdui-text-field id="announcement-button2-text" label="按钮文字"></mdui-text-field>
-      <mdui-text-field id="announcement-button2-exec" label="执行动作"></mdui-text-field>
-      <mdui-text-field id="announcement-button2-argument" label="参数"></mdui-text-field>
+      <mdui-select id="announcement-button2-exec" label="执行动作">
+        <mdui-menu-item value="None">不设置按钮</mdui-menu-item>
+        <mdui-menu-item value="OpenWebsite">OpenWebsite</mdui-menu-item>
+        <mdui-menu-item value="StopShow">StopShow</mdui-menu-item>
+      </mdui-select>
+      <div id="announcement-button2-argument-wrapper" class="space-y-1">
+        <mdui-text-field id="announcement-button2-argument" label="参数"></mdui-text-field>
+        <p class="text-xs text-gray-500">OpenWebsite 需要填写参数；StopShow 会自动使用当前公告 UUID。</p>
+      </div>
     </div>
   `;
 
@@ -263,6 +311,36 @@ function createAnnouncementDialogBody(initial?: AnnouncementItem) {
   const button2ArgumentField = body.querySelector(
     "#announcement-button2-argument",
   ) as any;
+  const button1ArgumentWrapper = body.querySelector(
+    "#announcement-button1-argument-wrapper",
+  ) as HTMLDivElement | null;
+  const button2ArgumentWrapper = body.querySelector(
+    "#announcement-button2-argument-wrapper",
+  ) as HTMLDivElement | null;
+
+  function syncButtonVisibility(
+    execField: any,
+    textField: any,
+    argumentField: any,
+    argumentWrapper: HTMLDivElement | null,
+  ) {
+    const action = normalizeExec(execField.value);
+    const shouldShowButton = action !== "None";
+    const shouldShowArgument = action === "OpenWebsite";
+
+    if (textField) {
+      textField.style.display = shouldShowButton ? "" : "none";
+    }
+
+    if (argumentWrapper) {
+      argumentWrapper.style.display = shouldShowArgument ? "" : "none";
+    }
+
+    if (!shouldShowButton) {
+      textField.value = "";
+      argumentField.value = "";
+    }
+  }
 
   titleField.value = initial?.title ?? "";
   detailsField.value = initial?.details ?? "";
@@ -280,12 +358,42 @@ function createAnnouncementDialogBody(initial?: AnnouncementItem) {
   const initialButton2 = normalizeButton(initial?.buttons?.[1]);
 
   button1TextField.value = initialButton1?.text ?? "";
-  button1ExecField.value = initialButton1?.exec ?? "OpenWebSite";
+  button1ExecField.value = getButtonActionValue(initialButton1);
   button1ArgumentField.value = initialButton1?.argument ?? "";
 
   button2TextField.value = initialButton2?.text ?? "";
-  button2ExecField.value = initialButton2?.exec ?? "OpenWebSite";
+  button2ExecField.value = getButtonActionValue(initialButton2);
   button2ArgumentField.value = initialButton2?.argument ?? "";
+
+  syncButtonVisibility(
+    button1ExecField,
+    button1TextField,
+    button1ArgumentField,
+    button1ArgumentWrapper,
+  );
+  syncButtonVisibility(
+    button2ExecField,
+    button2TextField,
+    button2ArgumentField,
+    button2ArgumentWrapper,
+  );
+
+  button1ExecField.addEventListener("change", () => {
+    syncButtonVisibility(
+      button1ExecField,
+      button1TextField,
+      button1ArgumentField,
+      button1ArgumentWrapper,
+    );
+  });
+  button2ExecField.addEventListener("change", () => {
+    syncButtonVisibility(
+      button2ExecField,
+      button2TextField,
+      button2ArgumentField,
+      button2ArgumentWrapper,
+    );
+  });
 
   return {
     body,
@@ -310,10 +418,20 @@ function readButton(
   textField: any,
   execField: any,
   argumentField: any,
+  announcementId?: string | null,
 ): AnnouncementButtonResponse | null {
   const text = String(textField.value ?? "").trim();
-  const exec = String(execField.value ?? "").trim();
-  const argument = String(argumentField.value ?? "").trim();
+  const exec = normalizeExec(execField.value);
+  const argument =
+    exec === "StopShow"
+      ? String(announcementId ?? "").trim()
+      : exec === "None"
+        ? ""
+        : String(argumentField.value ?? "").trim();
+
+  if (exec === "None") {
+    return null;
+  }
 
   if (!text && !exec && !argument) {
     return null;
@@ -321,7 +439,7 @@ function readButton(
 
   return {
     text,
-    exec: exec || "OpenWebSite",
+    exec,
     argument,
   };
 }
@@ -372,15 +490,31 @@ function openAnnouncementDialog(initial?: AnnouncementItem) {
             form.button1TextField,
             form.button1ExecField,
             form.button1ArgumentField,
+            initial?.id,
           );
           const button2 = readButton(
             form.button2TextField,
             form.button2ExecField,
             form.button2ArgumentField,
+            initial?.id,
           );
           const buttons = [button1, button2].filter(
             (button): button is AnnouncementButtonResponse => Boolean(button),
           );
+
+          if (
+            buttons.some(
+              (button) =>
+                normalizeExec(button.exec) === "OpenWebsite" &&
+                !String(button.argument ?? "").trim(),
+            )
+          ) {
+            snackbar({
+              message: "OpenWebsite 按钮需要填写参数",
+            });
+            return false;
+          }
+
           const payload = {
             title,
             details,
@@ -391,14 +525,47 @@ function openAnnouncementDialog(initial?: AnnouncementItem) {
             buttons,
           };
 
+          const ensureStopShowArguments = (items: AnnouncementButtonResponse[]) =>
+            items.map((button) =>
+              normalizeExec(button.exec) === "StopShow"
+                ? { ...button, argument: initial?.id ?? "" }
+                : button,
+            );
+
           return (async () => {
             if (initial?.id) {
-              await updateAnnouncement(initial.id, payload);
+              await updateAnnouncement(
+                initial.id,
+                {
+                  ...payload,
+                  buttons: ensureStopShowArguments(payload.buttons),
+                },
+              );
               snackbar({
                 message: "公告更新成功",
               });
             } else {
-              await createAnnouncement(payload);
+              const createdResponse = await createAnnouncement(payload);
+              const createdAnnouncement =
+                (createdResponse as any)?.data?.data ??
+                (createdResponse as any)?.data ??
+                (createdResponse as any);
+              const createdId = createdAnnouncement?.id;
+              const hasStopShowAction = payload.buttons.some(
+                (button) => normalizeExec(button.exec) === "StopShow",
+              );
+
+              if (createdId && hasStopShowAction) {
+                await updateAnnouncement(createdId, {
+                  ...payload,
+                  buttons: ensureStopShowArguments(payload.buttons).map((button) =>
+                    normalizeExec(button.exec) === "StopShow"
+                      ? { ...button, argument: createdId }
+                      : button,
+                  ),
+                });
+              }
+
               snackbar({
                 message: "公告创建成功",
               });

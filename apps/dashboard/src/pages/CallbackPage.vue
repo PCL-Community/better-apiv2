@@ -112,8 +112,7 @@ onMounted(async () => {
   } catch (err) {
     console.error("OAuth 回调失败:", err);
     error.value = true;
-    errorMessage.value =
-      err instanceof Error ? err.message : "GitHub OAuth 登录失败。";
+    errorMessage.value = "GitHub OAuth 登录失败。";
   } finally {
     loading.value = false;
   }

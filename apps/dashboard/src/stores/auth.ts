@@ -5,10 +5,10 @@ import { checkAuth as checkAuthApi } from '../services/api'
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | AdminUser | null>(null)
-  const token = ref<string | null>(localStorage.getItem('auth_token'))
+  const token = ref<string | null>(null)
   const loading = ref(false)
 
-  const isAuthenticated = computed(() => !!token.value)
+  const isAuthenticated = computed(() => !!token.value || !!user.value)
   const isAdmin = computed(() => Boolean(user.value?.isTeamMember))
 
   function setUser(newUser: User | AdminUser | null) {
@@ -17,11 +17,6 @@ export const useAuthStore = defineStore('auth', () => {
 
   function setToken(newToken: string | null) {
     token.value = newToken
-    if (newToken) {
-      localStorage.setItem('auth_token', newToken)
-    } else {
-      localStorage.removeItem('auth_token')
-    }
   }
 
   function setLoading(isLoading: boolean) {
@@ -31,7 +26,6 @@ export const useAuthStore = defineStore('auth', () => {
   function logout() {
     user.value = null
     token.value = null
-    localStorage.removeItem('auth_token')
   }
 
   async function checkAuth() {
@@ -43,8 +37,23 @@ export const useAuthStore = defineStore('auth', () => {
       } else {
         setUser(null)
       }
+    } catch {
+      setUser(null)
+      token.value = null
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function restoreSession() {
+    if (token.value) return
+    try {
+      const response = await checkAuthApi()
+      if (response && 'user' in response && response.user) {
+        setUser(response.user)
+      }
+    } catch {
+      // no valid cookie session
     }
   }
 
@@ -59,5 +68,6 @@ export const useAuthStore = defineStore('auth', () => {
     setLoading,
     logout,
     checkAuth,
+    restoreSession,
   }
 })

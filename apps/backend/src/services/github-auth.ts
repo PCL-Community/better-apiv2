@@ -1,3 +1,5 @@
+import prisma from './db'
+
 const GITHUB_API_BASE = 'https://api.github.com'
 const GITHUB_OAUTH_BASE = 'https://github.com/login/oauth'
 
@@ -22,6 +24,10 @@ function getRequiredEnv(name: string): string {
   return value
 }
 
+async function githubFetch(input: string, init: RequestInit = {}) {
+  return fetch(input, init)
+}
+
 export function getGithubOAuthLoginUrl(state: string): string {
   const clientId = getRequiredEnv('GITHUB_CLIENT_ID')
   const redirectUri = getRequiredEnv('GITHUB_REDIRECT_URI')
@@ -41,7 +47,7 @@ export async function exchangeCodeForAccessToken(code: string): Promise<string> 
   const clientSecret = getRequiredEnv('GITHUB_CLIENT_SECRET')
   const redirectUri = getRequiredEnv('GITHUB_REDIRECT_URI')
 
-  const response = await fetch(`${GITHUB_OAUTH_BASE}/access_token`, {
+  const response = await githubFetch(`${GITHUB_OAUTH_BASE}/access_token`, {
     method: 'POST',
     headers: {
       Accept: 'application/json',
@@ -69,7 +75,7 @@ export async function exchangeCodeForAccessToken(code: string): Promise<string> 
 }
 
 export async function fetchGithubUserProfile(accessToken: string): Promise<GithubUserProfile> {
-  const response = await fetch(`${GITHUB_API_BASE}/user`, {
+  const response = await githubFetch(`${GITHUB_API_BASE}/user`, {
     headers: {
       Accept: 'application/vnd.github+json',
       Authorization: `Bearer ${accessToken}`,
@@ -85,16 +91,13 @@ export async function fetchGithubUserProfile(accessToken: string): Promise<Githu
   return (await response.json()) as GithubUserProfile
 }
 
-export async function checkGithubTeamMembership(
-  accessToken: string,
-  login?: string,
-): Promise<boolean> {
+export async function checkGithubTeamMembership(accessToken: string, login?: string): Promise<boolean> {
   const org = process.env.GITHUB_ORG || 'PCL-Community'
   const teamSlug = process.env.GITHUB_TEAM_SLUG || 'ce-dev'
-  const username = login ?? (await fetchGithubUserProfile(accessToken)).login
+  const userLogin = login ?? (await fetchGithubUserProfile(accessToken)).login
 
-  const response = await fetch(
-    `${GITHUB_API_BASE}/orgs/${encodeURIComponent(org)}/teams/${encodeURIComponent(teamSlug)}/memberships/${encodeURIComponent(username)}`,
+  const response = await githubFetch(
+    `${GITHUB_API_BASE}/orgs/${encodeURIComponent(org)}/teams/${encodeURIComponent(teamSlug)}/memberships/${encodeURIComponent(userLogin)}`,
     {
       headers: {
         Accept: 'application/vnd.github+json',
@@ -115,4 +118,31 @@ export async function checkGithubTeamMembership(
 
   const membership = (await response.json()) as { state?: string }
   return membership.state === 'active'
+}
+
+export async function storeOAuthState(state: string): Promise<void> {
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000)
+  await prisma.cache.upsert({
+    where: { key: `oauth_state:${state}` },
+    update: { value: state, expiresAt },
+    create: { key: `oauth_state:${state}`, value: state, expiresAt },
+  })
+}
+
+export async function validateOAuthState(state: string): Promise<boolean> {
+  if (!state) return false
+
+  const record = await prisma.cache.findUnique({
+    where: { key: `oauth_state:${state}` },
+  })
+
+  if (!record) return false
+
+  if (record.expiresAt && record.expiresAt.getTime() <= Date.now()) {
+    await prisma.cache.delete({ where: { key: `oauth_state:${state}` } }).catch(() => undefined)
+    return false
+  }
+
+  await prisma.cache.delete({ where: { key: `oauth_state:${state}` } }).catch(() => undefined)
+  return true
 }
