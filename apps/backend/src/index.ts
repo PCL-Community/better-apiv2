@@ -22,7 +22,9 @@ const app = new Elysia()
   })
   .use(cors({
     credentials: true,
-  }))
+    origin: 'https://management.pclc.cc, http://127.0.0.1:4173, http://localhost:4173',
+    }
+  ))
   .use(swagger({
     documentation: {
       info: {
