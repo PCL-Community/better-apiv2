@@ -1,4 +1,5 @@
 import prisma from './db'
+import { cacheGet, cacheSet, invalidateAnnouncementsCache, CacheKeys } from './redis'
 import type {
   Announcement,
   AnnouncementButton,
@@ -152,6 +153,10 @@ export class AnnouncementService {
    * 获取所有公告
    */
   static async getAnnouncements(): Promise<AnnouncementResponse> {
+    const cacheKey = CacheKeys.announcements()
+    const cached = await cacheGet<AnnouncementResponse>(cacheKey)
+    if (cached) return cached
+
     const announcements = await prisma.announcement.findMany({
       include: {
         button1: true,
@@ -162,7 +167,9 @@ export class AnnouncementService {
       },
     })
 
-    return announcements.map((announcement) => toAnnouncement(announcement as AnnouncementRecord))
+    const result = announcements.map((announcement) => toAnnouncement(announcement as AnnouncementRecord))
+    await cacheSet(cacheKey, result)
+    return result
   }
 
   /**
@@ -181,13 +188,16 @@ export class AnnouncementService {
       date: data.date,
     }
 
-    return await prisma.announcement.create({
+    const result = await prisma.announcement.create({
       data: createData,
       include: {
         button1: true,
         button2: true,
       },
     })
+
+    await invalidateAnnouncementsCache()
+    return result
   }
 
   /**
@@ -206,7 +216,7 @@ export class AnnouncementService {
       date: data.date,
     }
 
-    return await prisma.announcement.update({
+    const result = await prisma.announcement.update({
       where: { id },
       data: updateData,
       include: {
@@ -214,14 +224,20 @@ export class AnnouncementService {
         button2: true,
       },
     })
+
+    await invalidateAnnouncementsCache()
+    return result
   }
 
   /**
    * 删除公告
    */
   static async deleteAnnouncement(id: string) {
-    return await prisma.announcement.delete({
+    const result = await prisma.announcement.delete({
       where: { id },
     })
+
+    await invalidateAnnouncementsCache()
+    return result
   }
 }

@@ -31,6 +31,7 @@ const CACHE_PREFIX = 'better-api:'
 const DEFAULT_TTL = 3600
 
 export const CacheKeys = {
+  announcements: () => `${CACHE_PREFIX}announcements`,
   channelUpdates: (channel: string, baseUrl?: string) =>
     `${CACHE_PREFIX}updates:channel:${channel}${baseUrl ? `:${baseUrl}` : ''}`,
   allUpdates: (baseUrl?: string) =>
@@ -84,5 +85,15 @@ export async function invalidateAllCache(): Promise<void> {
     if (keys.length > 0) await redis.del(...keys)
   } catch (error) {
     console.error('[Redis] invalidateAllCache error:', error)
+  }
+}
+
+export async function invalidateAnnouncementsCache(): Promise<void> {
+  try {
+    await cacheDel(CacheKeys.announcements())
+    const keys = await redis.keys(`${CACHE_PREFIX}cache:*`)
+    if (keys.length > 0) await redis.del(...keys)
+  } catch (error) {
+    console.error('[Redis] invalidateAnnouncementsCache error:', error)
   }
 }
