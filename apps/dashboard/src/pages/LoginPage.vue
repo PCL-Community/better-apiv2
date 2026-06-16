@@ -42,7 +42,7 @@ async function handleLogin() {
       const apiBase =
         (import.meta.env.VITE_API_URL as string) || window.location.origin;
       const state = crypto.randomUUID();
-      localStorage.setItem('oauth_state', state);
+      sessionStorage.setItem('oauth_state', state);
 
       setTimeout(() => {
         window.location.href = `${apiBase.replace(/\/$/, "")}/auth/github/login?state=${state}`;

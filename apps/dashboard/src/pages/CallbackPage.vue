@@ -59,8 +59,8 @@ onMounted(async () => {
     }
 
     if (isClient) {
-      const savedState = localStorage.getItem("oauth_state");
-      localStorage.removeItem("oauth_state"); // 使用后作废
+      const savedState = sessionStorage.getItem("oauth_state");
+      sessionStorage.removeItem("oauth_state"); // 使用后作废
 
       if (!savedState || savedState !== state.value) {
         error.value = true;
