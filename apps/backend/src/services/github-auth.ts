@@ -85,12 +85,16 @@ export async function fetchGithubUserProfile(accessToken: string): Promise<Githu
   return (await response.json()) as GithubUserProfile
 }
 
-export async function checkGithubTeamMembership(accessToken: string): Promise<boolean> {
+export async function checkGithubTeamMembership(
+  accessToken: string,
+  login?: string,
+): Promise<boolean> {
   const org = process.env.GITHUB_ORG || 'PCL-Community'
   const teamSlug = process.env.GITHUB_TEAM_SLUG || 'ce-dev'
+  const username = login ?? (await fetchGithubUserProfile(accessToken)).login
 
   const response = await fetch(
-    `${GITHUB_API_BASE}/orgs/${encodeURIComponent(org)}/teams/${encodeURIComponent(teamSlug)}/memberships/${encodeURIComponent((await fetchGithubUserProfile(accessToken)).login)}`,
+    `${GITHUB_API_BASE}/orgs/${encodeURIComponent(org)}/teams/${encodeURIComponent(teamSlug)}/memberships/${encodeURIComponent(username)}`,
     {
       headers: {
         Accept: 'application/vnd.github+json',

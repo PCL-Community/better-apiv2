@@ -1,3 +1,4 @@
+import crypto from 'crypto'
 import prisma from './db'
 import {
   checkGithubTeamMembership,
@@ -23,7 +24,7 @@ export class AdminAuthService {
   static async loginWithGithubCode(code: string) {
     const githubAccessToken = await exchangeCodeForAccessToken(code)
     const profile = await fetchGithubUserProfile(githubAccessToken)
-    const isTeamMember = await checkGithubTeamMembership(githubAccessToken)
+    const isTeamMember = await checkGithubTeamMembership(githubAccessToken, profile.login)
 
     const user = await prisma.adminUser.upsert({
       where: { githubId: String(profile.id) },
@@ -46,7 +47,7 @@ export class AdminAuthService {
       throw new ForbiddenError('Only PCL-Community/ce-dev members can use admin API')
     }
 
-    const token = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '')
+    const token = crypto.randomBytes(32).toString('hex')
     const expiresAt = new Date(Date.now() + getSessionTtlHours() * 60 * 60 * 1000)
 
     await prisma.adminSession.create({
