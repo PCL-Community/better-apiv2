@@ -1,4 +1,4 @@
-import { Elysia } from 'elysia'
+import { Elysia, t } from 'elysia'
 import { AnnouncementService } from '../services/announcement'
 import { UpdateService, ReleaseSourceService } from '../services/update'
 import { requireAdminByAuthorizationHeader } from '../services/admin-guard'
@@ -20,75 +20,76 @@ function normalizeAnnouncementBody(body: any) {
 }
 
 export const adminRoutes = new Elysia({ prefix: '/admin' })
-  .get('/me', async ({ headers, set }) => {
+  .resolve({ as: 'scoped' }, async ({ headers, set }) => {
     const authResult = await requireAdminByAuthorizationHeader(headers.authorization)
-
     if ('error' in authResult) {
       set.status = authResult.error === 'forbidden' ? 403 : 401
-      return { success: false, error: authResult.message }
+      // Returning early; handler checks this signal
+      return { adminUser: null, authError: authResult }
     }
-
+    return { adminUser: authResult, authError: null }
+  })
+  .get('/me', async ({ adminUser, authError, set }) => {
+    if (authError) {
+      return { success: false, error: authError.message }
+    }
     return {
       success: true,
       user: {
-        id: authResult.id,
-        githubId: authResult.githubId,
-        login: authResult.login,
-        name: authResult.name,
-        avatarUrl: authResult.avatarUrl,
-        expiresAt: authResult.expiresAt,
+        id: adminUser!.id,
+        githubId: adminUser!.githubId,
+        login: adminUser!.login,
+        name: adminUser!.name,
+        avatarUrl: adminUser!.avatarUrl,
+        expiresAt: adminUser!.expiresAt,
       },
     }
   })
   // ── Announcements ──────────────────────────────────────────────────────
-  .post('/announcements', async ({ headers, body, set }: { headers: Record<string, string | undefined>, body: any, set: any }) => {
-    const authResult = await requireAdminByAuthorizationHeader(headers.authorization)
-    if ('error' in authResult) {
-      set.status = authResult.error === 'forbidden' ? 403 : 401
-      return { success: false, error: authResult.message }
+  .post('/announcements', async ({ adminUser, authError, body, set }) => {
+    if (authError) {
+      set.status = authError.error === 'forbidden' ? 403 : 401
+      return { success: false, error: authError.message }
     }
     try {
       const result = await AnnouncementService.createAnnouncement(normalizeAnnouncementBody(body))
       return { success: true, data: result }
     } catch (error) {
       set.status = 400
-      return { success: false, error: '创建公告失败' }
+      return { success: false, error: error instanceof Error ? error.message : '创建公告失败' }
     }
   })
-  .put('/announcements/:id', async ({ headers, params: { id }, body, set }: { headers: Record<string, string | undefined>, params: { id: string }, body: any, set: any }) => {
-    const authResult = await requireAdminByAuthorizationHeader(headers.authorization)
-    if ('error' in authResult) {
-      set.status = authResult.error === 'forbidden' ? 403 : 401
-      return { success: false, error: authResult.message }
+  .put('/announcements/:id', async ({ adminUser, authError, params: { id }, body, set }) => {
+    if (authError) {
+      set.status = authError.error === 'forbidden' ? 403 : 401
+      return { success: false, error: authError.message }
     }
     try {
       const result = await AnnouncementService.updateAnnouncement(id, normalizeAnnouncementBody(body))
       return { success: true, data: result }
     } catch (error) {
       set.status = 400
-      return { success: false, error: '更新公告失败' }
+      return { success: false, error: error instanceof Error ? error.message : '更新公告失败' }
     }
   })
-  .delete('/announcements/:id', async ({ headers, params: { id }, set }) => {
-    const authResult = await requireAdminByAuthorizationHeader(headers.authorization)
-    if ('error' in authResult) {
-      set.status = authResult.error === 'forbidden' ? 403 : 401
-      return { success: false, error: authResult.message }
+  .delete('/announcements/:id', async ({ adminUser, authError, params: { id }, set }) => {
+    if (authError) {
+      set.status = authError.error === 'forbidden' ? 403 : 401
+      return { success: false, error: authError.message }
     }
     try {
       await AnnouncementService.deleteAnnouncement(id)
       return { success: true }
-    } catch {
+    } catch (error) {
       set.status = 400
-      return { success: false, error: '删除公告失败' }
+      return { success: false, error: error instanceof Error ? error.message : '删除公告失败' }
     }
   })
   // ── Updates: Single Upload ──────────────────────────────────────────────
-  .post('/updates', async ({ headers, request, set }: { headers: Record<string, string | undefined>, request: Request, set: any }) => {
-    const authResult = await requireAdminByAuthorizationHeader(headers.authorization)
-    if ('error' in authResult) {
-      set.status = authResult.error === 'forbidden' ? 403 : 401
-      return { success: false, error: authResult.message }
+  .post('/updates', async ({ adminUser, authError, request, set }) => {
+    if (authError) {
+      set.status = authError.error === 'forbidden' ? 403 : 401
+      return { success: false, error: authError.message }
     }
     try {
       const formData = await request.formData()
@@ -113,7 +114,7 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
         versionCode,
         ...(sourceGroup ? { sourceGroup } : {}),
         changelog,
-        uploadedByAdmin: authResult.login,
+        uploadedByAdmin: adminUser!.login,
       })
       return { success: true, data: result }
     } catch (error) {
@@ -123,11 +124,10 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
     }
   })
   // ── Updates: Batch Release ─────────────────────────────────────────────
-  .post('/updates/batch', async ({ headers, request, set }: { headers: Record<string, string | undefined>, request: Request, set: any }) => {
-    const authResult = await requireAdminByAuthorizationHeader(headers.authorization)
-    if ('error' in authResult) {
-      set.status = authResult.error === 'forbidden' ? 403 : 401
-      return { success: false, error: authResult.message }
+  .post('/updates/batch', async ({ adminUser, authError, request, set }) => {
+    if (authError) {
+      set.status = authError.error === 'forbidden' ? 403 : 401
+      return { success: false, error: authError.message }
     }
     try {
       const formData = await request.formData()
@@ -136,8 +136,6 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
       const changelog = String(formData.get('changelog') ?? '').trim()
       const sourceGroup = String(formData.get('source_group') ?? '').trim()
 
-      // Collect files and their channels from form data.
-      // Each file field is named like "file_frarm64", "file_frx64", etc.
       const fileChannels: { file: File; channel: string }[] = []
       for (const [key, value] of formData.entries()) {
         if (value && typeof value === 'object' && 'name' in value && 'size' in value) {
@@ -159,7 +157,7 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
         versionCode,
         ...(sourceGroup ? { sourceGroup } : {}),
         changelog,
-        uploadedByAdmin: authResult.login,
+        uploadedByAdmin: adminUser!.login,
         fileChannels,
       })
       return { success: true, data: results }
@@ -170,11 +168,10 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
     }
   })
   // ── Updates: Update Metadata ────────────────────────────────────────────
-  .put('/updates/:id', async ({ headers, params: { id }, body, set }: { headers: Record<string, string | undefined>, params: { id: string }, body: any, set: any }) => {
-    const authResult = await requireAdminByAuthorizationHeader(headers.authorization)
-    if ('error' in authResult) {
-      set.status = authResult.error === 'forbidden' ? 403 : 401
-      return { success: false, error: authResult.message }
+  .put('/updates/:id', async ({ adminUser, authError, params: { id }, body, set }) => {
+    if (authError) {
+      set.status = authError.error === 'forbidden' ? 403 : 401
+      return { success: false, error: authError.message }
     }
     try {
       const result = await UpdateService.updateMetadata(id, {
@@ -193,11 +190,10 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
     }
   })
   // ── Updates: Delete ────────────────────────────────────────────────────
-  .delete('/updates/:id', async ({ headers, params: { id }, set }) => {
-    const authResult = await requireAdminByAuthorizationHeader(headers.authorization)
-    if ('error' in authResult) {
-      set.status = authResult.error === 'forbidden' ? 403 : 401
-      return { success: false, error: authResult.message }
+  .delete('/updates/:id', async ({ adminUser, authError, params: { id }, set }) => {
+    if (authError) {
+      set.status = authError.error === 'forbidden' ? 403 : 401
+      return { success: false, error: authError.message }
     }
     try {
       await UpdateService.deleteUpdate(id)
@@ -209,26 +205,24 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
     }
   })
   // ── Release Sources: List ──────────────────────────────────────────────
-  .get('/sources', async ({ headers, query, set }: { headers: Record<string, string | undefined>, query: Record<string, string>, set: any }) => {
-    const authResult = await requireAdminByAuthorizationHeader(headers.authorization)
-    if ('error' in authResult) {
-      set.status = authResult.error === 'forbidden' ? 403 : 401
-      return { success: false, error: authResult.message }
+  .get('/sources', async ({ adminUser, authError, query, set }) => {
+    if (authError) {
+      set.status = authError.error === 'forbidden' ? 403 : 401
+      return { success: false, error: authError.message }
     }
     try {
       const sources = await ReleaseSourceService.listSources(query.group)
       return { success: true, data: sources }
     } catch (error) {
       set.status = 500
-      return { success: false, error: '获取源列表失败' }
+      return { success: false, error: error instanceof Error ? error.message : '获取源列表失败' }
     }
   })
   // ── Release Sources: Create ────────────────────────────────────────────
-  .post('/sources', async ({ headers, body, set }: { headers: Record<string, string | undefined>, body: any, set: any }) => {
-    const authResult = await requireAdminByAuthorizationHeader(headers.authorization)
-    if ('error' in authResult) {
-      set.status = authResult.error === 'forbidden' ? 403 : 401
-      return { success: false, error: authResult.message }
+  .post('/sources', async ({ adminUser, authError, body, set }) => {
+    if (authError) {
+      set.status = authError.error === 'forbidden' ? 403 : 401
+      return { success: false, error: authError.message }
     }
     try {
       const result = await ReleaseSourceService.createSource({
@@ -239,15 +233,14 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
       return { success: true, data: result }
     } catch (error) {
       set.status = 400
-      return { success: false, error: '创建源失败' }
+      return { success: false, error: error instanceof Error ? error.message : '创建源失败' }
     }
   })
   // ── Release Sources: Update ────────────────────────────────────────────
-  .put('/sources/:id', async ({ headers, params: { id }, body, set }: { headers: Record<string, string | undefined>, params: { id: string }, body: any, set: any }) => {
-    const authResult = await requireAdminByAuthorizationHeader(headers.authorization)
-    if ('error' in authResult) {
-      set.status = authResult.error === 'forbidden' ? 403 : 401
-      return { success: false, error: authResult.message }
+  .put('/sources/:id', async ({ adminUser, authError, params: { id }, body, set }) => {
+    if (authError) {
+      set.status = authError.error === 'forbidden' ? 403 : 401
+      return { success: false, error: authError.message }
     }
     try {
       const updateData: Record<string, unknown> = {}
@@ -255,26 +248,25 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
       if (body.baseUrl?.trim() ?? body.base_url?.trim()) updateData.baseUrl = (body.baseUrl ?? body.base_url).trim()
       if (body.groupName?.trim() ?? body.group_name?.trim()) updateData.groupName = (body.groupName ?? body.group_name).trim()
       if (body.enabled !== undefined) updateData.enabled = Boolean(body.enabled)
-      
+
       const result = await ReleaseSourceService.updateSource(id, updateData)
       return { success: true, data: result }
     } catch (error) {
       set.status = 400
-      return { success: false, error: '更新源失败' }
+      return { success: false, error: error instanceof Error ? error.message : '更新源失败' }
     }
   })
   // ── Release Sources: Delete ────────────────────────────────────────────
-  .delete('/sources/:id', async ({ headers, params: { id }, set }) => {
-    const authResult = await requireAdminByAuthorizationHeader(headers.authorization)
-    if ('error' in authResult) {
-      set.status = authResult.error === 'forbidden' ? 403 : 401
-      return { success: false, error: authResult.message }
+  .delete('/sources/:id', async ({ adminUser, authError, params: { id }, set }) => {
+    if (authError) {
+      set.status = authError.error === 'forbidden' ? 403 : 401
+      return { success: false, error: authError.message }
     }
     try {
       await ReleaseSourceService.deleteSource(id)
       return { success: true }
     } catch (error) {
       set.status = 400
-      return { success: false, error: '删除源失败' }
+      return { success: false, error: error instanceof Error ? error.message : '删除源失败' }
     }
   })
