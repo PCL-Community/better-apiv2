@@ -3,6 +3,47 @@ import { AnnouncementService } from '../services/announcement'
 import { UpdateService, ReleaseSourceService } from '../services/update'
 import { requireAdminByAuthorizationHeader } from '../services/admin-guard'
 
+// ── Validation Schemas ───────────────────────────────────────────────────
+
+const AnnouncementSchema = t.Object({
+  title: t.String({ minLength: 1 }),
+  details: t.Optional(t.String()),
+  detail: t.Optional(t.String()),
+  priority: t.Optional(t.Number()),
+  level: t.Optional(t.Number()),
+  date: t.String(),
+  skip: t.Optional(t.Nullable(t.Any())),
+  buttons: t.Optional(t.Array(t.Any())),
+  button1: t.Optional(t.Any()),
+  button2: t.Optional(t.Any()),
+})
+
+const SourceCreateSchema = t.Object({
+  name: t.String({ minLength: 1 }),
+  baseUrl: t.Optional(t.String()),
+  base_url: t.Optional(t.String()),
+  groupName: t.Optional(t.String()),
+  group_name: t.Optional(t.String()),
+})
+
+const SourceUpdateSchema = t.Object({
+  name: t.Optional(t.String()),
+  baseUrl: t.Optional(t.String()),
+  base_url: t.Optional(t.String()),
+  groupName: t.Optional(t.String()),
+  group_name: t.Optional(t.String()),
+  enabled: t.Optional(t.Boolean()),
+})
+
+const UpdateMetadataSchema = t.Object({
+  file_name: t.Optional(t.String()),
+  channel: t.Optional(t.String()),
+  version_name: t.Optional(t.String()),
+  version_code: t.Optional(t.Number()),
+  source_group: t.Optional(t.String()),
+  changelog: t.Optional(t.String()),
+})
+
 function normalizeAnnouncementBody(body: any) {
   const buttons = Array.isArray(body.buttons)
     ? body.buttons
@@ -24,12 +65,11 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
     const authResult = await requireAdminByAuthorizationHeader(headers.authorization)
     if ('error' in authResult) {
       set.status = authResult.error === 'forbidden' ? 403 : 401
-      // Returning early; handler checks this signal
       return { adminUser: null, authError: authResult }
     }
     return { adminUser: authResult, authError: null }
   })
-  .get('/me', async ({ adminUser, authError, set }) => {
+  .get('/me', async ({ adminUser, authError }) => {
     if (authError) {
       return { success: false, error: authError.message }
     }
@@ -59,7 +99,7 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
       set.status = 400
       return { success: false, error: error instanceof Error ? error.message : '创建公告失败' }
     }
-  })
+  }, { body: AnnouncementSchema })
   .put('/announcements/:id', async ({ adminUser, authError, params: { id }, body, set }) => {
     if (authError) {
       set.status = authError.error === 'forbidden' ? 403 : 401
@@ -72,7 +112,7 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
       set.status = 400
       return { success: false, error: error instanceof Error ? error.message : '更新公告失败' }
     }
-  })
+  }, { body: AnnouncementSchema })
   .delete('/announcements/:id', async ({ adminUser, authError, params: { id }, set }) => {
     if (authError) {
       set.status = authError.error === 'forbidden' ? 403 : 401
@@ -189,7 +229,7 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
       console.error('更新元数据失败:', error)
       return { success: false, error: error instanceof Error ? error.message : '更新资产失败' }
     }
-  })
+  }, { body: UpdateMetadataSchema })
   // ── Updates: Delete ────────────────────────────────────────────────────
   .delete('/updates/:id', async ({ adminUser, authError, params: { id }, set }) => {
     if (authError) {
@@ -236,7 +276,7 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
       set.status = 400
       return { success: false, error: error instanceof Error ? error.message : '创建源失败' }
     }
-  })
+  }, { body: SourceCreateSchema })
   // ── Release Sources: Update ────────────────────────────────────────────
   .put('/sources/:id', async ({ adminUser, authError, params: { id }, body, set }) => {
     if (authError) {
@@ -256,7 +296,7 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
       set.status = 400
       return { success: false, error: error instanceof Error ? error.message : '更新源失败' }
     }
-  })
+  }, { body: SourceUpdateSchema })
   // ── Release Sources: Delete ────────────────────────────────────────────
   .delete('/sources/:id', async ({ adminUser, authError, params: { id }, set }) => {
     if (authError) {
