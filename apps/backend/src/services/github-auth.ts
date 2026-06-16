@@ -1,3 +1,5 @@
+import prisma from './db'
+
 const GITHUB_API_BASE = 'https://api.github.com'
 const GITHUB_OAUTH_BASE = 'https://github.com/login/oauth'
 
@@ -150,4 +152,31 @@ export async function checkGithubTeamMembership(accessToken: string): Promise<bo
 
   const membership = (await response.json()) as { state?: string }
   return membership.state === 'active'
+}
+
+export async function storeOAuthState(state: string): Promise<void> {
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000)
+  await prisma.cache.upsert({
+    where: { key: `oauth_state:${state}` },
+    update: { value: state, expiresAt },
+    create: { key: `oauth_state:${state}`, value: state, expiresAt },
+  })
+}
+
+export async function validateOAuthState(state: string): Promise<boolean> {
+  if (!state) return false
+
+  const record = await prisma.cache.findUnique({
+    where: { key: `oauth_state:${state}` },
+  })
+
+  if (!record) return false
+
+  if (record.expiresAt && record.expiresAt.getTime() <= Date.now()) {
+    await prisma.cache.delete({ where: { key: `oauth_state:${state}` } }).catch(() => undefined)
+    return false
+  }
+
+  await prisma.cache.delete({ where: { key: `oauth_state:${state}` } }).catch(() => undefined)
+  return true
 }
