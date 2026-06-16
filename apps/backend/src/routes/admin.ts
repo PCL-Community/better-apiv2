@@ -18,7 +18,11 @@ const AnnouncementSchema = t.Object({
   level: t.Optional(t.Number()),
   date: t.String(),
   skip: t.Optional(t.Nullable(t.Any())),
-  buttons: t.Optional(t.Array(t.Any())),
+  buttons: t.Optional(t.Array(t.Object({
+    text: t.String(),
+    exec: t.String(),
+    argument: t.String(),
+  }))),
   button1: t.Optional(t.Any()),
   button2: t.Optional(t.Any()),
 })
@@ -45,7 +49,7 @@ const UpdateMetadataSchema = t.Object({
   channel: t.Optional(t.String()),
   version_name: t.Optional(t.String()),
   version_code: t.Optional(t.Number()),
-  source_group: t.Optional(t.String()),
+  source_group: t.Optional(t.Union([t.String(), t.Null()])),
   changelog: t.Optional(t.String()),
   required: t.Optional(t.Any()),
   required_dotnet: t.Optional(t.Number()),
