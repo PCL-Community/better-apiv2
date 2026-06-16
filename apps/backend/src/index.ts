@@ -14,13 +14,11 @@ const app = new Elysia()
   .onAfterHandle(({ request, startTime, set }) => {
     const duration = (performance.now() - startTime).toFixed(2)
     const status = set.status ?? 200
-    console.log(`[${new Date().toISOString()}] ${request.method} ${request.url} - ${status} (${duration}ms)`)
-  })
-  .onResponse(({ set }) => {
     set.headers['X-Content-Type-Options'] = 'nosniff'
     set.headers['X-Frame-Options'] = 'DENY'
     set.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
     set.headers['X-XSS-Protection'] = '0'
+    console.log(`[${new Date().toISOString()}] ${request.method} ${request.url} - ${status} (${duration}ms)`)
   })
   .use(cors({
     credentials: true,
