@@ -6,6 +6,13 @@ import AdmZip from "adm-zip";
 import prisma from "./db";
 import type { Prisma } from "../../generated/prisma/client";
 import { storageService } from "./object-storage";
+import {
+  cacheGet,
+  cacheSet,
+  invalidateChannelCache,
+  invalidateAllCache,
+  CacheKeys,
+} from "./redis";
 import type {
   UpdateAsset,
   UpdateRequirements,
@@ -42,13 +49,13 @@ type UpdateMetadataInput = {
 };
 
 type BatchReleaseInput = {
-  versionName: string
-  versionCode: number
-  sourceGroup?: string
-  changelog: string
-  uploadedByAdmin: string
-  required: UpdateRequirements
-  fileChannels: { file: File; channel: string }[]
+  versionName: string;
+  versionCode: number;
+  sourceGroup?: string;
+  changelog: string;
+  uploadedByAdmin: string;
+  required: UpdateRequirements;
+  fileChannels: { file: File; channel: string }[];
 };
 
 type UpdateChannelKey = "frarm64" | "frx64" | "srarm64" | "srx64";
@@ -332,6 +339,10 @@ export class UpdateService {
       return { assets: [] };
     }
 
+    const cacheKey = CacheKeys.channelUpdates(channelKey!, baseUrl);
+    const cached = await cacheGet<UpdatesResponse>(cacheKey);
+    if (cached) return cached;
+
     const query = {
       include: {
         generatedPatches: {
@@ -345,11 +356,11 @@ export class UpdateService {
       },
     } as const;
 
-    const latest = await prisma.updateFile.findFirst({
+    const latest = (await prisma.updateFile.findFirst({
       ...query,
       where: { channel: dbChannel },
       orderBy: [{ versionCode: "desc" }, { uploadedAt: "desc" }],
-    }) as Prisma.UpdateFileGetPayload<typeof query> | null;
+    })) as Prisma.UpdateFileGetPayload<typeof query> | null;
 
     if (!latest) {
       return { assets: [] };
@@ -360,19 +371,15 @@ export class UpdateService {
       assets.map(async (asset) => {
         const channelLabel = channelLabelMap[asset.channel];
 
-        // Build download URLs: always use the local download endpoint which will redirect
         const downloads: string[] = [
           joinUrl(baseUrl, `/apiv2/updates/${asset.id}/download`),
         ];
 
-        // Build patches list: patches TO this version + patches FROM this version
         const patches: string[] = [];
         for (const patch of asset.generatedPatches) {
-          // fromUpdate → this (toUpdate)
           patches.push(`${patch.fromUpdateFile.sha256}_${asset.sha256}.patch`);
         }
         for (const patch of asset.sourcePatches) {
-          // this (fromUpdate) → toUpdate
           patches.push(`${asset.sha256}_${patch.toUpdateFile.sha256}.patch`);
         }
 
@@ -397,13 +404,19 @@ export class UpdateService {
       }),
     );
 
-    return { assets: content };
+    const result = { assets: content };
+    await cacheSet(cacheKey, result);
+    return result;
   }
 
   /**
    * Get all update assets across every channel.
    */
   static async getAllUpdates(baseUrl?: string): Promise<UpdatesResponse> {
+    const cacheKey = CacheKeys.allUpdates(baseUrl);
+    const cached = await cacheGet<UpdatesResponse>(cacheKey);
+    if (cached) return cached;
+
     const query = {
       include: {
         generatedPatches: {
@@ -417,10 +430,10 @@ export class UpdateService {
       },
     } as const;
 
-    const updates = await prisma.updateFile.findMany({
+    const updates = (await prisma.updateFile.findMany({
       ...query,
       orderBy: [{ versionCode: "desc" }, { uploadedAt: "desc" }],
-    }) as Prisma.UpdateFileGetPayload<typeof query>[];
+    })) as Prisma.UpdateFileGetPayload<typeof query>[];
 
     const assets: UpdateAsset[] = await Promise.all(
       updates.map(async (asset) => {
@@ -458,7 +471,9 @@ export class UpdateService {
       }),
     );
 
-    return { assets };
+    const result = { assets };
+    await cacheSet(cacheKey, result);
+    return result;
   }
 
   // ── Cache Generation ────────────────────────────────────────────────────
@@ -468,6 +483,10 @@ export class UpdateService {
    * Mirrors the Python `update_source_cache_file_v2` logic.
    */
   static async computeCache(baseUrl?: string): Promise<CacheResponse> {
+    const cacheKey = CacheKeys.cacheJson(baseUrl);
+    const cached = await cacheGet<CacheResponse>(cacheKey);
+    if (cached) return cached;
+
     const allChannels: UpdateChannelKey[] = [
       "frarm64",
       "frx64",
@@ -483,13 +502,13 @@ export class UpdateService {
       cache[ch] = md5Hash(jsonStr);
     }
 
-    // Announcement cache: hash the announcement JSON
     const announcements = await prisma.announcement.findMany({
       orderBy: { createdAt: "desc" },
     });
     const announcementJson = JSON.stringify({ content: announcements });
     cache["announcement"] = md5Hash(announcementJson);
 
+    await cacheSet(cacheKey, cache);
     return cache;
   }
 
@@ -588,6 +607,9 @@ export class UpdateService {
       });
     }
 
+    await invalidateChannelCache(channel);
+    await invalidateAllCache();
+
     return updateFile;
   }
 
@@ -626,7 +648,7 @@ export class UpdateService {
   static async updateMetadata(id: string, input: UpdateMetadataInput) {
     const channel = normalizeChannel(input.channel);
     const required = normalizeRequirements(input.required);
-    return prisma.updateFile.update({
+    const result = await prisma.updateFile.update({
       where: { id },
       data: {
         ...(input.fileName?.trim() ? { fileName: input.fileName.trim() } : {}),
@@ -639,6 +661,9 @@ export class UpdateService {
         changelog: input.changelog.trim(),
       },
     });
+
+    await invalidateAllCache();
+    return result;
   }
 
   // ── Admin: Delete ───────────────────────────────────────────────────────
@@ -656,11 +681,16 @@ export class UpdateService {
       ...updateFile.sourcePatches.map((p) => p.s3Key),
     ];
 
+    const channelKey = channelLabelMap[updateFile.channel];
+
     await prisma.patchJobQueue.deleteMany({ where: { updateFileId: id } });
     await prisma.patchFile.deleteMany({
       where: { OR: [{ fromUpdateFileId: id }, { toUpdateFileId: id }] },
     });
     await prisma.updateFile.delete({ where: { id } });
+
+    await invalidateChannelCache(channelKey);
+    await invalidateAllCache();
 
     for (const key of keysToDelete) {
       await storageService.deleteObject(key).catch((error) => {
@@ -733,17 +763,27 @@ export class UpdateService {
     await ensureTempRoot();
 
     // Extract EXEs from the zips to compute patches
-    const sourceExePath = path.join(tempRoot, `source-${source.id}-${Date.now()}.exe`);
-    const targetExePath = path.join(tempRoot, `target-${job.updateFile.id}-${Date.now()}.exe`);
-    
+    const sourceExePath = path.join(
+      tempRoot,
+      `source-${source.id}-${Date.now()}.exe`,
+    );
+    const targetExePath = path.join(
+      tempRoot,
+      `target-${job.updateFile.id}-${Date.now()}.exe`,
+    );
+
     try {
       const sourceZip = new AdmZip(sourcePath);
-      const sourceExe = sourceZip.readFile("Plain Craft Launcher Community Edition.exe");
+      const sourceExe = sourceZip.readFile(
+        "Plain Craft Launcher Community Edition.exe",
+      );
       if (!sourceExe) throw new Error("Invalid source zip: missing executable");
       await fs.writeFile(sourceExePath, sourceExe);
 
       const targetZip = new AdmZip(targetPath);
-      const targetExe = targetZip.readFile("Plain Craft Launcher Community Edition.exe");
+      const targetExe = targetZip.readFile(
+        "Plain Craft Launcher Community Edition.exe",
+      );
       if (!targetExe) throw new Error("Invalid target zip: missing executable");
       await fs.writeFile(targetExePath, targetExe);
     } catch (error) {
@@ -854,10 +894,12 @@ export class UpdateService {
     if (updateFile.sourceGroup) {
       const mirrorUrls = await ReleaseSourceService.getDownloadUrls(
         updateFile.sha256,
-        updateFile.sourceGroup
+        updateFile.sourceGroup,
       );
       if (mirrorUrls.length > 0) {
-        return mirrorUrls[Math.floor(Math.random() * mirrorUrls.length)] ?? null;
+        return (
+          mirrorUrls[Math.floor(Math.random() * mirrorUrls.length)] ?? null
+        );
       }
     }
 
@@ -886,7 +928,10 @@ export class UpdateService {
     };
   }
 
-  static async getPatchDownloadInfoBySha256(oldSha256: string, newSha256: string) {
+  static async getPatchDownloadInfoBySha256(
+    oldSha256: string,
+    newSha256: string,
+  ) {
     const patchFile = await prisma.patchFile.findFirst({
       where: {
         fromUpdateFile: { sha256: oldSha256 },
@@ -912,7 +957,10 @@ export class UpdateService {
     return patchFile?.s3Url || null;
   }
 
-  static async getPatchRedirectUrlBySha256(oldSha256: string, newSha256: string): Promise<string | null> {
+  static async getPatchRedirectUrlBySha256(
+    oldSha256: string,
+    newSha256: string,
+  ): Promise<string | null> {
     const patchFile = await prisma.patchFile.findFirst({
       where: {
         fromUpdateFile: { sha256: oldSha256 },
@@ -925,12 +973,19 @@ export class UpdateService {
     });
     if (!patchFile) return null;
 
-    const groupName = patchFile.toUpdateFile.sourceGroup ?? patchFile.fromUpdateFile.sourceGroup;
+    const groupName =
+      patchFile.toUpdateFile.sourceGroup ??
+      patchFile.fromUpdateFile.sourceGroup;
     if (groupName) {
       const filename = `${oldSha256}_${newSha256}.patch`;
-      const mirrorUrls = await ReleaseSourceService.getPatchDownloadUrls(filename, groupName);
+      const mirrorUrls = await ReleaseSourceService.getPatchDownloadUrls(
+        filename,
+        groupName,
+      );
       if (mirrorUrls.length > 0) {
-        return mirrorUrls[Math.floor(Math.random() * mirrorUrls.length)] ?? null;
+        return (
+          mirrorUrls[Math.floor(Math.random() * mirrorUrls.length)] ?? null
+        );
       }
     }
 
