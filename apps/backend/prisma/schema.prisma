@@ -12,6 +12,7 @@ datasource db {
   provider = "postgresql"
 }
 
+// FR = Beta (pre-release), SR = Release (stable)
 enum VersionChannel {
   FRARM64
   FRX64
@@ -34,10 +35,13 @@ enum PatchJobStatus {
 model Announcement {
   id        String   @id @default(uuid())
   title     String
+// Deprecated: use `details` instead. Kept for backward compatibility.
   detail    String
   details   String?  @db.Text
   priority  Int      @default(0)
   level     Int      @default(0)
+  // JSON fields for skip logic and buttons array.
+  // These are the primary storage; button1/button2 relations are legacy.
   skip      String?  @db.Text
   buttons   String?  @db.Text
   date      DateTime
