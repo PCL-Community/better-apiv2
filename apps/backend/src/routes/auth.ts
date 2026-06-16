@@ -73,7 +73,7 @@ export const authRoutes = new Elysia({ prefix: '/auth/github' })
     } catch (error) {
       if (error instanceof ForbiddenError) {
         set.status = 403
-        return { success: false, error: error.message }
+        return { success: false, error: '您没有访问权限' }
       }
 
       set.status = 401

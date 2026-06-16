@@ -36,7 +36,11 @@ function normalizeRequiredBody(body: any) {
 }
 
 export const adminRoutes = new Elysia({ prefix: '/admin' })
-  .get('/me', async ({ headers, set }) => {
+  .get('/me', async ({ headers, set, request }) => {
+    const clientIp = getClientIp(request)
+    const rateCheck = adminRateLimiter(clientIp)
+    if (!rateCheck.allowed) { set.status = 429; return { success: false, error: '请求过于频繁' } }
+
     const authResult = await requireAdmin(headers)
 
     if ('error' in authResult) {

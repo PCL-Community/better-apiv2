@@ -59,9 +59,9 @@ export function getGithubLoginUrl(state?: string): string {
  * 处理 GitHub OAuth 回调并获取 token
  * @param code - GitHub OAuth 授权码
  */
-export async function handleGithubCallback(code: string) {
+export async function handleGithubCallback(code: string, state?: string) {
   const response = await baseApiClient.auth.github.callback.get({
-    query: { code },
+    query: { code, ...(state ? { state } : {}) },
   })
   return response.data
 }
@@ -81,16 +81,12 @@ export async function checkAuth() {
 export async function logout() {
   const authStore = useAuthStore()
   try {
-    const token = authStore.token
-    if (token) {
-      await baseApiClient.auth.github.logout.post(undefined, {
-        headers: getAuthHeaders(token),
-      })
-    }
+    await baseApiClient.auth.github.logout.post(undefined, {
+      headers: getAuthHeaders(authStore.token),
+    })
   } catch (error) {
     console.error('Logout API call failed:', error)
   }
-  // 清除本地 token
   authStore.logout()
 }
 
