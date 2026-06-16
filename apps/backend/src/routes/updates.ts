@@ -1,17 +1,18 @@
 import { Elysia } from 'elysia'
 import { UpdateService } from '../services/update'
+import { createRateLimiter, getClientIp } from '../services/rate-limiter'
+
+const publicRateLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 200 })
 
 function parseChannelFromPathSegment(raw: string): string | null {
   const normalized = raw.toLowerCase().replace(/\.json$/, '')
 
-  // supports: updates-srx64, updates-srarm64, updates-frx64, updates-frarm64
   const match = normalized.match(/^updates-(frarm64|frx64|srarm64|srx64)$/)
   if (match) {
     const channel = match[1]
     if (channel) return channel
   }
 
-  // also allow direct channel segment for compatibility: /updates/srx64
   if (['frarm64', 'frx64', 'srarm64', 'srx64'].includes(normalized)) {
     return normalized
   }
@@ -24,8 +25,11 @@ function getBaseUrl(request: Request): string {
 }
 
 export const updateRoutes = new Elysia({ prefix: '/apiv2' })
-  // ── v2 API: /apiv2/cache.json ──────────────────────────────────
   .get('/cache.json', async ({ request }) => {
+    const clientIp = getClientIp(request)
+    const rateCheck = publicRateLimiter(clientIp)
+    if (!rateCheck.allowed) return {}
+
     try {
       return await UpdateService.computeCache(getBaseUrl(request))
     } catch (error) {
@@ -33,8 +37,11 @@ export const updateRoutes = new Elysia({ prefix: '/apiv2' })
       return {}
     }
   })
-  // ── v2 API: /apiv2/cache.json (top-level cache) ────────────────────────
   .get('/cache', async ({ request }) => {
+    const clientIp = getClientIp(request)
+    const rateCheck = publicRateLimiter(clientIp)
+    if (!rateCheck.allowed) return {}
+
     try {
       return await UpdateService.computeCache(getBaseUrl(request))
     } catch (error) {
@@ -42,10 +49,12 @@ export const updateRoutes = new Elysia({ prefix: '/apiv2' })
       return {}
     }
   })
-  // ── v2 API: /apiv2/updates/updates-{channel}.json ──────────────────────
   .get('/updates/updates-:channel.json', async ({ params, request, set }) => {
+    const clientIp = getClientIp(request)
+    const rateCheck = publicRateLimiter(clientIp)
+    if (!rateCheck.allowed) return { assets: [] }
+
     try {
-      // Elysia captures the param as "channel.json", extract the channel part
       const rawChannel = (params as Record<string, string>)['channel.json'] ?? ''
       const channel = rawChannel.toLowerCase()
       if (!['frarm64', 'frx64', 'srarm64', 'srx64'].includes(channel)) {
@@ -58,8 +67,11 @@ export const updateRoutes = new Elysia({ prefix: '/apiv2' })
       return { assets: [] }
     }
   })
-  // ── Query-based: /apiv2/updates?channel=xxx ────────────────────────────
   .get('/updates', async ({ query, request }: { query?: Record<string, string>, request: Request }) => {
+    const clientIp = getClientIp(request)
+    const rateCheck = publicRateLimiter(clientIp)
+    if (!rateCheck.allowed) return { assets: [] }
+
     try {
       const channel = query?.channel?.trim()
       if (channel) {
@@ -72,15 +84,20 @@ export const updateRoutes = new Elysia({ prefix: '/apiv2' })
       return { assets: [] }
     }
   })
-  // ── Download: /apiv2/updates/:id/download ──────────────────────────────
-  .get('/updates/:id/download', async ({ params, set }) => {
+  .get('/updates/:id/download', async ({ params, set, request }) => {
+    const clientIp = getClientIp(request)
+    const rateCheck = publicRateLimiter(clientIp)
+    if (!rateCheck.allowed) {
+      set.status = 429
+      return { success: false, error: '请求过于频繁' }
+    }
+
     try {
       const redirectUrl = await UpdateService.getUpdateRedirectUrl(params.id)
       if (redirectUrl) {
         return Response.redirect(redirectUrl, 302)
       }
 
-      // fallback to local file download
       const { filePath, sha256 } = (await UpdateService.getUpdateDownloadPathAndSha(params.id)) ?? {};
       if (!filePath || !sha256) {
         set.status = 404
@@ -93,7 +110,6 @@ export const updateRoutes = new Elysia({ prefix: '/apiv2' })
         return { success: false, error: '更新文件不存在' }
       }
 
-      // the stored file is already a zip file containing the updated exe
       set.headers['content-type'] = 'application/zip'
       set.headers['content-disposition'] = `attachment; filename="${sha256}.zip"`
       return new Response(file)
@@ -103,8 +119,14 @@ export const updateRoutes = new Elysia({ prefix: '/apiv2' })
       return { success: false, error: '获取下载地址失败' }
     }
   })
-  // ── Patch download: /apiv2/updates/:id/patches/:patchId/download ───────
-  .get('/updates/:id/patches/:patchId/download', async ({ params, set }) => {
+  .get('/updates/:id/patches/:patchId/download', async ({ params, set, request }) => {
+    const clientIp = getClientIp(request)
+    const rateCheck = publicRateLimiter(clientIp)
+    if (!rateCheck.allowed) {
+      set.status = 429
+      return { success: false, error: '请求过于频繁' }
+    }
+
     try {
       const patchInfo = await UpdateService.getPatchDownloadInfo(params.patchId)
       if (!patchInfo || !patchInfo.filePath) {
@@ -127,8 +149,11 @@ export const updateRoutes = new Elysia({ prefix: '/apiv2' })
       return { success: false, error: '下载补丁文件失败' }
     }
   })
-  // ── Legacy: /apiv2/updates/:id (channel-based lookup) ──────────────────
   .get('/updates/:id', async ({ params, set, request }) => {
+    const clientIp = getClientIp(request)
+    const rateCheck = publicRateLimiter(clientIp)
+    if (!rateCheck.allowed) return { assets: [] }
+
     try {
       const channel = parseChannelFromPathSegment(params.id)
       if (!channel) {
@@ -143,19 +168,20 @@ export const updateRoutes = new Elysia({ prefix: '/apiv2' })
   })
 
 export const staticRoutes = new Elysia()
-  // ── Patch redirect: /static/patch/{oldSha}_{newSha}.patch ───────────────
-  .get('/static/patch/:filename', async ({ params, set }) => {
+  .get('/static/patch/:filename', async ({ params, set, request }) => {
+    const clientIp = getClientIp(request)
+    const rateCheck = publicRateLimiter(clientIp)
+    if (!rateCheck.allowed) {
+      set.status = 429
+      return { success: false, error: '请求过于频繁' }
+    }
+
     try {
       const filename = params.filename
-      if (!filename.endsWith('.patch')) {
-        set.status = 404
-        return { success: false, error: '文件格式不支持' }
-      }
-
       const hashPair = filename.replace('.patch', '')
       const [oldSha256, newSha256] = hashPair.split('_')
 
-      if (!oldSha256 || !newSha256) {
+      if (!filename.endsWith('.patch') || !oldSha256 || !newSha256) {
         set.status = 400
         return { success: false, error: '文件名格式错误' }
       }

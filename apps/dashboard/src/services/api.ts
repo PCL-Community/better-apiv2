@@ -4,22 +4,22 @@ import { useAuthStore } from '../stores/auth'
 
 const baseURL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
 
-const baseApiClient = treaty<App>(baseURL)
+const baseApiClient = treaty<App>(baseURL, {
+  fetcher: (input: RequestInfo | URL, init?: RequestInit) =>
+    fetch(input, { ...init, credentials: 'include' }),
+})
 
 function normalizeWindowsLineBreaks(value: string) {
   return value.replace(/\r?\n/g, '\n')
 }
 
-function getAuthHeaders(token: string) {
-  return {
-    Authorization: `Bearer ${token}`,
-  }
+function getAuthHeaders(token?: string | null) {
+  if (!token) return {}
+  return { Authorization: `Bearer ${token}` }
 }
 
-export function getAuthRequestOptions(token: string) {
-  return {
-    headers: getAuthHeaders(token),
-  }
+export function getAuthRequestOptions(token?: string | null) {
+  return { headers: getAuthHeaders(token) }
 }
 
 // ============ 公开 API ============
@@ -70,14 +70,7 @@ export async function handleGithubCallback(code: string) {
  * 检查当前 token 是否有效并获取用户信息
  */
 export async function checkAuth() {
-  const authStore = useAuthStore()
-  if (!authStore.token) {
-    throw new Error('Not authenticated')
-  }
-
-  const response = await baseApiClient.admin.me.get({
-    headers: getAuthHeaders(authStore.token),
-  })
+  const response = await baseApiClient.admin.me.get()
   return response.data
 }
 
@@ -108,9 +101,6 @@ export async function logout() {
  */
 export async function getAdminProfile() {
   const authStore = useAuthStore()
-  if (!authStore.token) {
-    throw new Error('Not authenticated')
-  }
 
   const response = await baseApiClient.admin.me.get({
     headers: getAuthHeaders(authStore.token),
@@ -140,9 +130,6 @@ export async function createAnnouncement(data: {
   }>
 }) {
   const authStore = useAuthStore()
-  if (!authStore.token) {
-    throw new Error('Not authenticated')
-  }
 
   const response = await baseApiClient.admin.announcements.post({
     title: data.title,
@@ -180,9 +167,6 @@ export async function updateAnnouncement(id: string, data: {
   }>
 }) {
   const authStore = useAuthStore()
-  if (!authStore.token) {
-    throw new Error('Not authenticated')
-  }
 
   const response = await baseApiClient.admin.announcements({ id }).put({
     title: data.title,
@@ -203,9 +187,6 @@ export async function updateAnnouncement(id: string, data: {
  */
 export async function deleteAnnouncement(id: string) {
   const authStore = useAuthStore()
-  if (!authStore.token) {
-    throw new Error('Not authenticated')
-  }
 
   const response = await baseApiClient.admin.announcements({ id }).delete(undefined, {
     headers: getAuthHeaders(authStore.token),
@@ -232,9 +213,6 @@ export async function uploadUpdate(data: {
   }
 }) {
   const authStore = useAuthStore()
-  if (!authStore.token) {
-    throw new Error('Not authenticated')
-  }
 
   const formData = new FormData()
   formData.append('file', data.file)
@@ -252,6 +230,7 @@ export async function uploadUpdate(data: {
   const response = await fetch(`${baseURL}/admin/updates`, {
     method: 'POST',
     headers: getAuthHeaders(authStore.token),
+    credentials: 'include',
     body: formData,
   })
 
@@ -278,9 +257,6 @@ export async function batchUploadUpdates(data: {
   }
 }) {
   const authStore = useAuthStore()
-  if (!authStore.token) {
-    throw new Error('Not authenticated')
-  }
 
   const formData = new FormData()
   for (const { file, channel } of data.fileChannels) {
@@ -298,6 +274,7 @@ export async function batchUploadUpdates(data: {
   const response = await fetch(`${baseURL}/admin/updates/batch`, {
     method: 'POST',
     headers: getAuthHeaders(authStore.token),
+    credentials: 'include',
     body: formData,
   })
 
@@ -325,9 +302,6 @@ export async function updateUpdate(id: string, data: {
   }
 }) {
   const authStore = useAuthStore()
-  if (!authStore.token) {
-    throw new Error('Not authenticated')
-  }
 
   const response = await baseApiClient.admin.updates({ id }).put({
     file_name: data.file_name,
@@ -348,9 +322,6 @@ export async function updateUpdate(id: string, data: {
  */
 export async function deleteUpdate(id: string) {
   const authStore = useAuthStore()
-  if (!authStore.token) {
-    throw new Error('Not authenticated')
-  }
 
   const response = await baseApiClient.admin.updates({ id }).delete(undefined, {
     headers: getAuthHeaders(authStore.token),
@@ -365,9 +336,6 @@ export async function deleteUpdate(id: string) {
  */
 export async function getSources(groupName?: string) {
   const authStore = useAuthStore()
-  if (!authStore.token) {
-    throw new Error('Not authenticated')
-  }
 
   const response = await baseApiClient.admin.sources.get({
     query: groupName ? { group: groupName } : {},
@@ -385,9 +353,6 @@ export async function createSource(data: {
   groupName: string
 }) {
   const authStore = useAuthStore()
-  if (!authStore.token) {
-    throw new Error('Not authenticated')
-  }
 
   const response = await fetch(`${baseURL}/admin/sources`, {
     method: 'POST',
@@ -395,6 +360,7 @@ export async function createSource(data: {
       ...getAuthHeaders(authStore.token),
       'Content-Type': 'application/json',
     },
+    credentials: 'include',
     body: JSON.stringify({
       name: data.name,
       base_url: data.baseUrl,
@@ -420,9 +386,6 @@ export async function updateSource(id: string, data: {
   enabled?: boolean
 }) {
   const authStore = useAuthStore()
-  if (!authStore.token) {
-    throw new Error('Not authenticated')
-  }
 
   const body: Record<string, unknown> = {}
   if (data.name !== undefined) body.name = data.name
@@ -436,6 +399,7 @@ export async function updateSource(id: string, data: {
       ...getAuthHeaders(authStore.token),
       'Content-Type': 'application/json',
     },
+    credentials: 'include',
     body: JSON.stringify(body),
   })
 
@@ -452,13 +416,11 @@ export async function updateSource(id: string, data: {
  */
 export async function deleteSource(id: string) {
   const authStore = useAuthStore()
-  if (!authStore.token) {
-    throw new Error('Not authenticated')
-  }
 
   const response = await fetch(`${baseURL}/admin/sources/${id}`, {
     method: 'DELETE',
     headers: getAuthHeaders(authStore.token),
+    credentials: 'include',
   })
 
   const payload = await response.json()

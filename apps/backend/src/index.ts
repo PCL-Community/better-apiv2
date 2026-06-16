@@ -11,13 +11,20 @@ const app = new Elysia()
   .derive(() => ({
     startTime: performance.now()
   }))
-  // 在完成响应后输出详细日志
   .onAfterHandle(({ request, startTime, set }) => {
     const duration = (performance.now() - startTime).toFixed(2)
     const status = set.status ?? 200
     console.log(`[${new Date().toISOString()}] ${request.method} ${request.url} - ${status} (${duration}ms)`)
   })
-  .use(cors())
+  .onResponse(({ set }) => {
+    set.headers['X-Content-Type-Options'] = 'nosniff'
+    set.headers['X-Frame-Options'] = 'DENY'
+    set.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    set.headers['X-XSS-Protection'] = '0'
+  })
+  .use(cors({
+    credentials: true,
+  }))
   .use(swagger({
     documentation: {
       info: {
