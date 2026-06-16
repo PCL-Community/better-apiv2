@@ -23,7 +23,7 @@ export class AdminAuthService {
   static async loginWithGithubCode(code: string) {
     const githubAccessToken = await exchangeCodeForAccessToken(code)
     const profile = await fetchGithubUserProfile(githubAccessToken)
-    const isTeamMember = await checkGithubTeamMembership(githubAccessToken)
+    const isTeamMember = await checkGithubTeamMembership(githubAccessToken, profile.login)
 
     const user = await prisma.adminUser.upsert({
       where: { githubId: String(profile.id) },

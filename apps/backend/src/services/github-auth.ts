@@ -24,43 +24,8 @@ function getRequiredEnv(name: string): string {
   return value
 }
 
-function getGithubProxyUrl(): string | undefined {
-  const rawValue =
-    process.env.GITHUB_PROXY ??
-    process.env.HTTPS_PROXY ??
-    process.env.https_proxy ??
-    process.env.HTTP_PROXY ??
-    process.env.http_proxy ??
-    process.env.ALL_PROXY ??
-    process.env.all_proxy
-
-  const proxyUrl = rawValue?.trim()
-  if (!proxyUrl) {
-    return undefined
-  }
-
-  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(proxyUrl)) {
-    return proxyUrl
-  }
-
-  return `http://${proxyUrl}`
-}
-
-function createGithubFetchInit(init: RequestInit = {}): RequestInit & { proxy?: string } {
-  const proxy = getGithubProxyUrl()
-
-  if (!proxy) {
-    return init
-  }
-
-  return {
-    ...init,
-    proxy,
-  }
-}
-
 async function githubFetch(input: string, init: RequestInit = {}) {
-  return fetch(input, createGithubFetchInit(init))
+  return fetch(input, init)
 }
 
 export function getGithubOAuthLoginUrl(state: string): string {
@@ -126,12 +91,13 @@ export async function fetchGithubUserProfile(accessToken: string): Promise<Githu
   return (await response.json()) as GithubUserProfile
 }
 
-export async function checkGithubTeamMembership(accessToken: string): Promise<boolean> {
+export async function checkGithubTeamMembership(accessToken: string, login?: string): Promise<boolean> {
   const org = process.env.GITHUB_ORG || 'PCL-Community'
   const teamSlug = process.env.GITHUB_TEAM_SLUG || 'ce-dev'
+  const userLogin = login ?? (await fetchGithubUserProfile(accessToken)).login
 
   const response = await githubFetch(
-    `${GITHUB_API_BASE}/orgs/${encodeURIComponent(org)}/teams/${encodeURIComponent(teamSlug)}/memberships/${encodeURIComponent((await fetchGithubUserProfile(accessToken)).login)}`,
+    `${GITHUB_API_BASE}/orgs/${encodeURIComponent(org)}/teams/${encodeURIComponent(teamSlug)}/memberships/${encodeURIComponent(userLogin)}`,
     {
       headers: {
         Accept: 'application/vnd.github+json',
