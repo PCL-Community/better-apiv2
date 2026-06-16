@@ -6,11 +6,13 @@ export interface User {
   name: string | null
   avatarUrl: string | null
   expiresAt?: number | Date
+  isTeamMember?: boolean
 }
 
 // 管理员信息
 export interface AdminUser extends User {
   expiresAt: number | Date
+  isTeamMember: true
 }
 
 // 公告信息

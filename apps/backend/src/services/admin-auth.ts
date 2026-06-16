@@ -67,6 +67,7 @@ export class AdminAuthService {
         login: user.login,
         name: user.name,
         avatarUrl: user.avatarUrl,
+        isTeamMember,
       },
     }
   }
@@ -103,6 +104,7 @@ export class AdminAuthService {
       name: session.user.name,
       avatarUrl: session.user.avatarUrl,
       expiresAt: session.expiresAt,
+      isTeamMember: session.user.isTeamMember,
     }
   }
 

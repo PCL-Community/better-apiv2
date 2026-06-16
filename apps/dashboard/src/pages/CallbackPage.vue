@@ -92,6 +92,7 @@ onMounted(async () => {
 
     authStore.setToken(payload.token);
 
+    // Try fetching full profile with team member status
     const meResponse = await api.admin.me.get(
       getAuthRequestOptions(payload.token),
     );
@@ -101,6 +102,7 @@ onMounted(async () => {
       !meResponse.data?.success ||
       !meResponse.data.user
     ) {
+      // payload.user may lack isTeamMember; trust callback response
       authStore.setUser(payload.user);
     } else {
       authStore.setUser(meResponse.data.user);

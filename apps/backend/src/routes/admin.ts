@@ -42,6 +42,7 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
         name: adminUser!.name,
         avatarUrl: adminUser!.avatarUrl,
         expiresAt: adminUser!.expiresAt,
+        isTeamMember: adminUser!.isTeamMember,
       },
     }
   })

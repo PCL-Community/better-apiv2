@@ -9,7 +9,7 @@ export const useAuthStore = defineStore('auth', () => {
   const loading = ref(false)
 
   const isAuthenticated = computed(() => !!token.value)
-  const isAdmin = computed(() => Boolean(user.value?.expiresAt))
+  const isAdmin = computed(() => Boolean(user.value?.isTeamMember))
 
   function setUser(newUser: User | AdminUser | null) {
     user.value = newUser
