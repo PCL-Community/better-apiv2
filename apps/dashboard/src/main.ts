@@ -14,9 +14,9 @@ const head = createHead()
 
 app.use(head)
 app.use(pinia);
-app.use(router);
 
 const authStore = useAuthStore(pinia);
-authStore.restoreSession()
+await authStore.restoreSession()
 
+app.use(router);
 app.mount("#app");
