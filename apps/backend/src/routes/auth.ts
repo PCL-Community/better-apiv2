@@ -8,11 +8,11 @@ const authRateLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 20 })
 function setAuthCookie(set: any, token: string, expiresAt: Date) {
   const maxAge = Math.floor((expiresAt.getTime() - Date.now()) / 1000)
   set.headers['Set-Cookie'] =
-    `auth_token=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${Math.max(0, maxAge)}`
+    `auth_token=${token}; HttpOnly; Secure; SameSite=None; Path=/; Max-Age=${Math.max(0, maxAge)}`
 }
 
 function clearAuthCookie(set: any) {
-  set.headers['Set-Cookie'] = 'auth_token=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0'
+  set.headers['Set-Cookie'] = 'auth_token=; HttpOnly; Secure; SameSite=None; Path=/; Max-Age=0'
 }
 
 export const authRoutes = new Elysia({ prefix: '/auth/github' })

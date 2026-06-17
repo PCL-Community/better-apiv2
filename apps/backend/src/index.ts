@@ -25,9 +25,8 @@ const app = new Elysia()
   })
   .use(cors({
     credentials: true,
-    origin: true,
-    }
-  ))
+    origin: process.env.CORS_ORIGIN || true,
+  }))
   .use(swagger({
     documentation: {
       info: {

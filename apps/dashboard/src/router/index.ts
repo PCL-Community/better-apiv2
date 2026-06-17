@@ -68,6 +68,8 @@ const router = createRouter({
 router.beforeEach(async (to, _from, next) => {
   const authStore = useAuthStore()
 
+  await authStore.ensureReady()
+
   if (authStore.isAuthenticated && !authStore.user) {
     try {
       await authStore.checkAuth()

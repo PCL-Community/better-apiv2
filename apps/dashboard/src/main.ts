@@ -16,7 +16,7 @@ app.use(head)
 app.use(pinia);
 
 const authStore = useAuthStore(pinia);
-await authStore.restoreSession()
+await authStore.ensureReady()
 
 app.use(router);
 app.mount("#app");
