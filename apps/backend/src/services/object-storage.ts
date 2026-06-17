@@ -7,6 +7,24 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3'
 
+type S3BackendConfig = {
+  name: string
+  endpoint?: string
+  bucket: string
+  region?: string
+  accessKey?: string
+  secretKey?: string
+  publicBaseUrl?: string
+  forcePathStyle?: boolean
+}
+
+type S3Backend = {
+  name: string
+  client: S3Client
+  bucket: string
+  publicBaseUrl: string
+}
+
 type UploadBufferOptions = {
   contentType?: string
   s3Key?: string
@@ -32,46 +50,112 @@ function toBuffer(value: Buffer | Uint8Array | ArrayBuffer) {
   return Buffer.from(value)
 }
 
-export class ObjectStorageService {
-  private readonly provider = (process.env.STORAGE_PROVIDER ?? 'local').toLowerCase()
-  private readonly uploadDir = path.resolve(process.cwd(), process.env.UPLOAD_DIR ?? './uploads')
-  private readonly bucket = process.env.S3_BUCKET ?? ''
-  private readonly endpoint = process.env.S3_ENDPOINT?.trim() || ''
-  private readonly region = process.env.S3_REGION?.trim() || 'auto'
-  private readonly accessKeyId = process.env.S3_ACCESS_KEY_ID?.trim() || ''
-  private readonly secretAccessKey = process.env.S3_SECRET_ACCESS_KEY?.trim() || ''
-  private readonly publicBaseUrl = process.env.S3_PUBLIC_BASE_URL?.trim() || ''
-  private readonly client: S3Client | null
+function parseS3Backends(): S3Backend[] {
+  const raw = process.env.S3_BACKENDS?.trim()
+  if (!raw) return []
 
-  constructor() {
-    if (this.provider === 's3' || this.provider === 'r2') {
-      if (!this.bucket) {
-        throw new Error('Missing S3_BUCKET environment variable')
-      }
+  let configs: S3BackendConfig[]
+  try {
+    configs = JSON.parse(raw)
+    if (!Array.isArray(configs) || configs.length === 0) return []
+  } catch {
+    console.warn('[ObjectStorage] 无法解析 S3_BACKENDS，回退到传统单后端配置')
+    return []
+  }
 
-      const config = {
-        region: this.region,
-        forcePathStyle: this.provider !== 'r2',
-        ...(this.endpoint ? { endpoint: this.endpoint } : {}),
-        ...(this.accessKeyId && this.secretAccessKey
+  const backends: S3Backend[] = []
+  for (const cfg of configs) {
+    if (!cfg.name || !cfg.bucket) {
+      console.warn('[ObjectStorage] 跳过无效的后端配置:', cfg)
+      continue
+    }
+
+    backends.push({
+      name: cfg.name,
+      client: new S3Client({
+        region: cfg.region || 'auto',
+        forcePathStyle: cfg.forcePathStyle ?? true,
+        ...(cfg.endpoint ? { endpoint: cfg.endpoint } : {}),
+        ...(cfg.accessKey && cfg.secretKey
           ? {
               credentials: {
-                accessKeyId: this.accessKeyId,
-                secretAccessKey: this.secretAccessKey,
+                accessKeyId: cfg.accessKey,
+                secretAccessKey: cfg.secretKey,
               },
             }
           : {}),
-      }
+      }),
+      bucket: cfg.bucket,
+      publicBaseUrl: trimTrailingSlash(cfg.publicBaseUrl || ''),
+    })
+  }
 
-      this.client = new S3Client(config)
+  return backends
+}
+
+function buildLegacyBackend(): S3Backend | null {
+  const provider = (process.env.STORAGE_PROVIDER ?? 'local').toLowerCase()
+  if (provider !== 's3' && provider !== 'r2') return null
+
+  const bucket = process.env.S3_BUCKET ?? ''
+  if (!bucket) {
+    throw new Error('Missing S3_BUCKET environment variable')
+  }
+
+  return {
+    name: provider,
+    client: new S3Client({
+      region: process.env.S3_REGION?.trim() || 'auto',
+      forcePathStyle: provider !== 'r2',
+      ...(process.env.S3_ENDPOINT?.trim()
+        ? { endpoint: process.env.S3_ENDPOINT.trim() }
+        : {}),
+      ...(process.env.S3_ACCESS_KEY_ID?.trim() &&
+      process.env.S3_SECRET_ACCESS_KEY?.trim()
+        ? {
+            credentials: {
+              accessKeyId: process.env.S3_ACCESS_KEY_ID.trim(),
+              secretAccessKey: process.env.S3_SECRET_ACCESS_KEY.trim(),
+            },
+          }
+        : {}),
+    }),
+    bucket,
+    publicBaseUrl: trimTrailingSlash(process.env.S3_PUBLIC_BASE_URL?.trim() || ''),
+  }
+}
+
+export class ObjectStorageService {
+  private readonly uploadDir = path.resolve(
+    process.cwd(),
+    process.env.UPLOAD_DIR ?? './uploads',
+  )
+  private readonly backends: S3Backend[]
+
+  constructor() {
+    const parsed = parseS3Backends()
+    if (parsed.length > 0) {
+      this.backends = parsed
+      console.log(
+        `[ObjectStorage] 已配置 ${this.backends.length} 个 S3 后端:`,
+        this.backends.map((b) => b.name).join(', '),
+      )
       return
     }
 
-    this.client = null
+    const legacy = buildLegacyBackend()
+    if (legacy) {
+      this.backends = [legacy]
+      return
+    }
+
+    this.backends = []
   }
 
   getProvider() {
-    return this.provider
+    if (this.backends.length > 1) return 'multi'
+    if (this.backends.length === 1) return this.backends[0]!.name
+    return 'local'
   }
 
   getLocalPath(key: string) {
@@ -79,34 +163,52 @@ export class ObjectStorageService {
   }
 
   getPublicLocation(key: string) {
-    if (this.publicBaseUrl) {
-      return `${trimTrailingSlash(this.publicBaseUrl)}/${key}`
+    if (this.backends.length > 0 && this.backends[0]!.publicBaseUrl) {
+      return `${this.backends[0]!.publicBaseUrl}/${key}`
     }
 
-    if (this.provider === 's3' || this.provider === 'r2') {
-      return `s3://${this.bucket}/${key}`
+    if (this.backends.length > 0) {
+      return `s3://${this.backends[0]!.bucket}/${key}`
     }
 
     return `local://${key}`
   }
 
-  async uploadBuffer(key: string, buffer: Buffer | Uint8Array | ArrayBuffer, options: UploadBufferOptions = {}) {
+  async uploadBuffer(
+    key: string,
+    buffer: Buffer | Uint8Array | ArrayBuffer,
+    options: UploadBufferOptions = {},
+  ) {
     const body = toBuffer(buffer)
     const localPath = this.getLocalPath(key)
 
     await fs.mkdir(path.dirname(localPath), { recursive: true })
     await fs.writeFile(localPath, body)
 
-    if (this.client) {
+    if (this.backends.length > 0) {
       const remoteKey = options.s3Key ?? key
-      await this.client.send(
-        new PutObjectCommand({
-          Bucket: this.bucket,
-          Key: remoteKey,
-          Body: body,
-          ContentType: options.contentType ?? 'application/octet-stream',
-        }),
+      const results = await Promise.allSettled(
+        this.backends.map((backend) =>
+          backend.client.send(
+            new PutObjectCommand({
+              Bucket: backend.bucket,
+              Key: remoteKey,
+              Body: body,
+              ContentType: options.contentType ?? 'application/octet-stream',
+            }),
+          ),
+        ),
       )
+
+      for (let i = 0; i < results.length; i++) {
+        const result = results[i]
+        if (result?.status === 'rejected') {
+          console.warn(
+            `[ObjectStorage] 上传到 ${this.backends[i]!.name} 失败:`,
+            result.reason,
+          )
+        }
+      }
     }
 
     return {
@@ -121,13 +223,28 @@ export class ObjectStorageService {
     const localPath = this.getLocalPath(key)
     await fs.unlink(localPath).catch(() => undefined)
 
-    if (this.client) {
-      await this.client.send(
-        new DeleteObjectCommand({
-          Bucket: this.bucket,
-          Key: s3Key ?? key,
-        }),
+    if (this.backends.length > 0) {
+      const remoteKey = s3Key ?? key
+      const results = await Promise.allSettled(
+        this.backends.map((backend) =>
+          backend.client.send(
+            new DeleteObjectCommand({
+              Bucket: backend.bucket,
+              Key: remoteKey,
+            }),
+          ),
+        ),
       )
+
+      for (let i = 0; i < results.length; i++) {
+        const result = results[i]
+        if (result?.status === 'rejected') {
+          console.warn(
+            `[ObjectStorage] 从 ${this.backends[i]!.name} 删除失败:`,
+            result.reason,
+          )
+        }
+      }
     }
   }
 
