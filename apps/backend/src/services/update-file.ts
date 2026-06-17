@@ -181,7 +181,15 @@ function buildPatchStorageKey(params: {
 }) {
   const safeSource = storageService.sanitizeKeyPart(params.sourceFileName);
   const safeTarget = storageService.sanitizeKeyPart(params.targetFileName);
-  return `patches/${params.channel}/${params.sourceVersionCode}-to-${params.targetVersionCode}/${safeSource}-${safeTarget}-${params.patchSha256.slice(0, 16)}.patch`;
+  return `patches/${params.channel}/${params.sourceVersionCode}-to-${params.targetVersionCode}/${safeSource}-${safeTarget}-${params.patchSha256.slice(0, 16)}.patch`
+}
+
+function buildMirrorUpdateKey(sha256: string) {
+  return `static/raw/${sha256}.zip`
+}
+
+function buildMirrorPatchKey(oldSha256: string, newSha256: string) {
+  return `static/patch/${oldSha256}_${newSha256}.patch`
 }
 
 async function ensureTempRoot() {
@@ -562,6 +570,7 @@ export class UpdateService {
 
     const stored = await storageService.uploadBuffer(s3Key, zipBuffer, {
       contentType: "application/zip",
+      s3Key: buildMirrorUpdateKey(sha256),
     });
 
     const updateFile = await prisma.updateFile.create({
@@ -671,15 +680,22 @@ export class UpdateService {
   static async deleteUpdate(id: string) {
     const updateFile = await prisma.updateFile.findUnique({
       where: { id },
-      include: { generatedPatches: true, sourcePatches: true },
+      include: {
+        generatedPatches: {
+          include: {
+            fromUpdateFile: { select: { sha256: true } },
+            toUpdateFile: { select: { sha256: true } },
+          },
+        },
+        sourcePatches: {
+          include: {
+            fromUpdateFile: { select: { sha256: true } },
+            toUpdateFile: { select: { sha256: true } },
+          },
+        },
+      },
     });
     if (!updateFile) throw new Error("Update file not found");
-
-    const keysToDelete = [
-      updateFile.s3Key,
-      ...updateFile.generatedPatches.map((p) => p.s3Key),
-      ...updateFile.sourcePatches.map((p) => p.s3Key),
-    ];
 
     const channelKey = channelLabelMap[updateFile.channel];
 
@@ -692,9 +708,28 @@ export class UpdateService {
     await invalidateChannelCache(channelKey);
     await invalidateAllCache();
 
-    for (const key of keysToDelete) {
-      await storageService.deleteObject(key).catch((error) => {
-        console.warn(`删除存储对象失败: ${key}`, error);
+    await storageService.deleteObject(
+      updateFile.s3Key,
+      buildMirrorUpdateKey(updateFile.sha256),
+    ).catch((error) => {
+      console.warn(`删除存储对象失败: ${updateFile.s3Key}`, error);
+    });
+
+    for (const p of updateFile.generatedPatches) {
+      await storageService.deleteObject(
+        p.s3Key,
+        buildMirrorPatchKey(p.fromUpdateFile.sha256, p.toUpdateFile.sha256),
+      ).catch((error) => {
+        console.warn(`删除存储对象失败: ${p.s3Key}`, error);
+      });
+    }
+
+    for (const p of updateFile.sourcePatches) {
+      await storageService.deleteObject(
+        p.s3Key,
+        buildMirrorPatchKey(p.fromUpdateFile.sha256, p.toUpdateFile.sha256),
+      ).catch((error) => {
+        console.warn(`删除存储对象失败: ${p.s3Key}`, error);
       });
     }
   }
@@ -706,9 +741,20 @@ export class UpdateService {
       where: { updateFileId, status: PatchJobStatus.PENDING },
       orderBy: { targetVersionCode: "asc" },
     });
+    if (jobs.length === 0) return;
+
     await runLimited(jobs, patchConcurrency, async (job) => {
       await this.processPatchJob(job.id);
     });
+
+    const updateFile = await prisma.updateFile.findUnique({
+      where: { id: updateFileId },
+      select: { channel: true },
+    });
+    if (updateFile) {
+      await invalidateChannelCache(channelLabelMap[updateFile.channel]);
+    }
+    await invalidateAllCache();
   }
 
   static async processPatchJob(jobId: string) {
@@ -831,6 +877,7 @@ export class UpdateService {
         patchBuffer,
         {
           contentType: "application/octet-stream",
+          s3Key: buildMirrorPatchKey(source.sha256, job.updateFile.sha256),
         },
       );
 

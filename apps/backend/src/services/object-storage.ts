@@ -9,6 +9,7 @@ import {
 
 type UploadBufferOptions = {
   contentType?: string
+  s3Key?: string
 }
 
 function trimTrailingSlash(value: string) {
@@ -97,10 +98,11 @@ export class ObjectStorageService {
     await fs.writeFile(localPath, body)
 
     if (this.client) {
+      const remoteKey = options.s3Key ?? key
       await this.client.send(
         new PutObjectCommand({
           Bucket: this.bucket,
-          Key: key,
+          Key: remoteKey,
           Body: body,
           ContentType: options.contentType ?? 'application/octet-stream',
         }),
@@ -110,12 +112,12 @@ export class ObjectStorageService {
     return {
       key,
       localPath,
-      publicLocation: this.getPublicLocation(key),
+      publicLocation: this.getPublicLocation(options.s3Key ?? key),
       size: body.length,
     }
   }
 
-  async deleteObject(key: string) {
+  async deleteObject(key: string, s3Key?: string) {
     const localPath = this.getLocalPath(key)
     await fs.unlink(localPath).catch(() => undefined)
 
@@ -123,7 +125,7 @@ export class ObjectStorageService {
       await this.client.send(
         new DeleteObjectCommand({
           Bucket: this.bucket,
-          Key: key,
+          Key: s3Key ?? key,
         }),
       )
     }
