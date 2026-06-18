@@ -729,9 +729,11 @@ export class UpdateService {
     // Invalidate individual caches (Fix 2)
     await invalidateUpdateFileCache(id);
     for (const p of updateFile.generatedPatches) {
+      await invalidatePatchFileCache(p.id);
       await invalidatePatchFileByShaCache(p.fromUpdateFile.sha256, p.toUpdateFile.sha256);
     }
     for (const p of updateFile.sourcePatches) {
+      await invalidatePatchFileCache(p.id);
       await invalidatePatchFileByShaCache(p.fromUpdateFile.sha256, p.toUpdateFile.sha256);
     }
     await invalidateChannelCache(channelKey);
