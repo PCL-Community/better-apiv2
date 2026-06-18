@@ -21,7 +21,25 @@ function parseChannelFromPathSegment(raw: string): string | null {
 }
 
 function getBaseUrl(request: Request): string {
-  return new URL(request.url).origin
+  const proto = request.headers.get('x-forwarded-proto')
+  const host = request.headers.get('x-forwarded-host')
+
+  if (proto && host) {
+    return `${proto}://${host}`
+  }
+
+  const url = new URL(request.url)
+
+  if (proto && proto !== url.protocol.replace(':', '')) {
+    if (host) return `${proto}://${host}`
+    return url.origin.replace(/^http:/, `${proto}:`)
+  }
+
+  if (host) {
+    return url.origin.replace(url.host, host)
+  }
+
+  return url.origin
 }
 
 export const updateRoutes = new Elysia({ prefix: '/apiv2' })
