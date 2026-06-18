@@ -726,18 +726,9 @@ export class UpdateService {
     });
     await prisma.updateFile.delete({ where: { id } });
 
-    // Invalidate individual caches (Fix 2)
     await invalidateUpdateFileCache(id);
-    for (const p of updateFile.generatedPatches) {
-      await invalidatePatchFileCache(p.id);
-      await invalidatePatchFileByShaCache(p.fromUpdateFile.sha256, p.toUpdateFile.sha256);
-    }
-    for (const p of updateFile.sourcePatches) {
-      await invalidatePatchFileCache(p.id);
-      await invalidatePatchFileByShaCache(p.fromUpdateFile.sha256, p.toUpdateFile.sha256);
-    }
     await invalidateChannelCache(channelKey);
-    await invalidateAllCache();
+    await invalidateAllCache(); // 清全库前缀，含所有 patchFile:<id>/:<sha> 缓存
 
     await storageService.deleteObject(
       updateFile.s3Key,
