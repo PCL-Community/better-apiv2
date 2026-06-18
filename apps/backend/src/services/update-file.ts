@@ -9,8 +9,13 @@ import { storageService } from "./object-storage";
 import {
   cacheGet,
   cacheSet,
+  cacheDel,
   invalidateChannelCache,
   invalidateAllCache,
+  invalidateUpdateFileCache,
+  invalidatePatchFileCache,
+  invalidatePatchFileByShaCache,
+  invalidateReleaseSourceCache,
   CacheKeys,
 } from "./redis";
 import type {
@@ -279,28 +284,40 @@ export class ReleaseSourceService {
     return prisma.releaseSource.delete({ where: { id } });
   }
 
-  /** Get download URLs for a source group */
+  /** Get download URLs for a source group (cached) */
   static async getDownloadUrls(
     sha256: string,
     groupName: string,
   ): Promise<string[]> {
-    const sources = await prisma.releaseSource.findMany({
-      where: { groupName, enabled: true },
-    });
+    const cacheKey = CacheKeys.releaseSourceGroup(groupName);
+    let sources = await cacheGet<Array<{ baseUrl: string }>>(cacheKey);
+    if (!sources) {
+      sources = await prisma.releaseSource.findMany({
+        where: { groupName, enabled: true },
+        select: { baseUrl: true },
+      });
+      if (sources.length > 0) await cacheSet(cacheKey, sources, 600);
+    }
     if (sources.length === 0) return [];
     return sources.map(
       (s) => `${s.baseUrl.replace(/\/+$/, "")}/static/raw/${sha256}.zip`,
     );
   }
 
-  /** Get patch download URLs for a source group */
+  /** Get patch download URLs for a source group (cached) */
   static async getPatchDownloadUrls(
     filename: string,
     groupName: string,
   ): Promise<string[]> {
-    const sources = await prisma.releaseSource.findMany({
-      where: { groupName, enabled: true },
-    });
+    const cacheKey = CacheKeys.releaseSourceGroup(groupName);
+    let sources = await cacheGet<Array<{ baseUrl: string }>>(cacheKey);
+    if (!sources) {
+      sources = await prisma.releaseSource.findMany({
+        where: { groupName, enabled: true },
+        select: { baseUrl: true },
+      });
+      if (sources.length > 0) await cacheSet(cacheKey, sources, 600);
+    }
     if (sources.length === 0) return [];
     return sources.map(
       (s) => `${s.baseUrl.replace(/\/+$/, "")}/static/patch/${filename}`,
@@ -616,6 +633,9 @@ export class UpdateService {
       });
     }
 
+    // Invalidate individual caches (Fix 2)
+    await invalidateUpdateFileCache(updateFile.id);
+
     await invalidateChannelCache(channel);
     await invalidateAllCache();
 
@@ -671,6 +691,7 @@ export class UpdateService {
       },
     });
 
+    await invalidateUpdateFileCache(id);
     await invalidateAllCache();
     return result;
   }
@@ -705,6 +726,14 @@ export class UpdateService {
     });
     await prisma.updateFile.delete({ where: { id } });
 
+    // Invalidate individual caches (Fix 2)
+    await invalidateUpdateFileCache(id);
+    for (const p of updateFile.generatedPatches) {
+      await invalidatePatchFileByShaCache(p.fromUpdateFile.sha256, p.toUpdateFile.sha256);
+    }
+    for (const p of updateFile.sourcePatches) {
+      await invalidatePatchFileByShaCache(p.fromUpdateFile.sha256, p.toUpdateFile.sha256);
+    }
     await invalidateChannelCache(channelKey);
     await invalidateAllCache();
 
@@ -881,7 +910,7 @@ export class UpdateService {
         },
       );
 
-      await prisma.patchFile.create({
+      const createdPatch = await prisma.patchFile.create({
         data: {
           fromUpdateFileId: source.id,
           toUpdateFileId: job.updateFile.id,
@@ -891,6 +920,10 @@ export class UpdateService {
           s3Url: storedPatch.publicLocation,
         },
       });
+
+      // Invalidate patch caches (Fix 2)
+      await invalidatePatchFileCache(createdPatch.id);
+      await invalidatePatchFileByShaCache(source.sha256, job.updateFile.sha256);
 
       await prisma.patchJobQueue.update({
         where: { id: job.id },
@@ -918,30 +951,43 @@ export class UpdateService {
   }
 
   // ── File Downloads ──────────────────────────────────────────────────────
+  // Fix 1: combined redirect+fallback methods eliminate redundant DB queries
+  // Fix 2: Redis cache for individual record lookups
+
+  /** Cached lookup: get updateFile record (Redis, 300s) */
+  private static async getCachedUpdateFile(id: string) {
+    const cacheKey = CacheKeys.updateFile(id);
+    const cached = await cacheGet<Record<string, unknown>>(cacheKey);
+    if (cached) return cached as Prisma.UpdateFileGetPayload<{}> | null;
+
+    const updateFile = await prisma.updateFile.findUnique({ where: { id } });
+    if (updateFile) await cacheSet(cacheKey, updateFile, 300);
+    return updateFile;
+  }
 
   static async getUpdateDownloadPath(id: string) {
-    const updateFile = await prisma.updateFile.findUnique({ where: { id } });
+    const updateFile = await this.getCachedUpdateFile(id);
     if (!updateFile) return null;
-    return storageService.getLocalPath(updateFile.s3Key);
+    return storageService.getLocalPath(updateFile.s3Key as string);
   }
 
   static async getUpdateDownloadPathAndSha(id: string) {
-    const updateFile = await prisma.updateFile.findUnique({ where: { id } });
+    const updateFile = await this.getCachedUpdateFile(id);
     if (!updateFile) return null;
     return {
-      filePath: storageService.getLocalPath(updateFile.s3Key),
-      sha256: updateFile.sha256,
+      filePath: storageService.getLocalPath(updateFile.s3Key as string),
+      sha256: updateFile.sha256 as string,
     };
   }
 
   static async getUpdateRedirectUrl(id: string): Promise<string | null> {
-    const updateFile = await prisma.updateFile.findUnique({ where: { id } });
+    const updateFile = await this.getCachedUpdateFile(id);
     if (!updateFile) return null;
 
     if (updateFile.sourceGroup) {
       const mirrorUrls = await ReleaseSourceService.getDownloadUrls(
-        updateFile.sha256,
-        updateFile.sourceGroup,
+        updateFile.sha256 as string,
+        updateFile.sourceGroup as string,
       );
       if (mirrorUrls.length > 0) {
         return (
@@ -950,28 +996,106 @@ export class UpdateService {
       }
     }
 
-    if (updateFile.s3Url.startsWith("http")) {
-      return updateFile.s3Url;
+    const s3Url = updateFile.s3Url as string;
+    if (s3Url.startsWith("http")) {
+      return s3Url;
     }
 
     const { API_URL } = process.env;
-    if (API_URL && updateFile.s3Url.startsWith("/")) {
-      return `${API_URL.replace(/\/+$/, "")}${updateFile.s3Url}`;
+    if (API_URL && s3Url.startsWith("/")) {
+      return `${API_URL.replace(/\/+$/, "")}${s3Url}`;
     }
 
     // fallback when no mirrors available and not external S3
     return null;
   }
 
-  static async getPatchDownloadInfo(id: string) {
+  /**
+   * Fix 1: Combined method — one DB lookup, returns both redirect URL and local fallback info.
+   */
+  static async getUpdateDownloadInfo(id: string): Promise<{
+    redirectUrl: string | null;
+    filePath: string;
+    sha256: string;
+  } | null> {
+    const updateFile = await this.getCachedUpdateFile(id);
+    if (!updateFile) return null;
+
+    let redirectUrl: string | null = null;
+    // Try mirrors via release source group
+    if (updateFile.sourceGroup) {
+      const mirrorUrls = await ReleaseSourceService.getDownloadUrls(
+        updateFile.sha256 as string,
+        updateFile.sourceGroup as string,
+      );
+      if (mirrorUrls.length > 0) {
+        redirectUrl = mirrorUrls[Math.floor(Math.random() * mirrorUrls.length)] ?? null;
+      }
+    }
+
+    // Fallback to S3 URL
+    if (!redirectUrl) {
+      const s3Url = updateFile.s3Url as string;
+      if (s3Url.startsWith("http")) {
+        redirectUrl = s3Url;
+      } else {
+        const { API_URL } = process.env;
+        if (API_URL && s3Url.startsWith("/")) {
+          redirectUrl = `${API_URL.replace(/\/+$/, "")}${s3Url}`;
+        }
+      }
+    }
+
+    return {
+      redirectUrl,
+      filePath: storageService.getLocalPath(updateFile.s3Key as string),
+      sha256: updateFile.sha256 as string,
+    };
+  }
+
+  /** Cached lookup: get patchFile by id (Redis, 300s) */
+  private static async getCachedPatchFile(id: string) {
+    const cacheKey = CacheKeys.patchFile(id);
+    const cached = await cacheGet<Record<string, unknown>>(cacheKey);
+    if (cached) return cached as Prisma.PatchFileGetPayload<{ include: { fromUpdateFile: true } }> | null;
+
     const patchFile = await prisma.patchFile.findUnique({
       where: { id },
       include: { fromUpdateFile: true },
     });
+    if (patchFile) await cacheSet(cacheKey, patchFile, 300);
+    return patchFile;
+  }
+
+  /** Cached lookup: get patchFile by sha256 pair (Redis, 300s) */
+  private static async getCachedPatchFileBySha(
+    oldSha256: string,
+    newSha256: string,
+  ) {
+    const cacheKey = CacheKeys.patchFileBySha(oldSha256, newSha256);
+    const cached = await cacheGet<Record<string, unknown>>(cacheKey);
+    if (cached) return cached;
+
+    const patchFile = await prisma.patchFile.findFirst({
+      where: {
+        fromUpdateFile: { sha256: oldSha256 },
+        toUpdateFile: { sha256: newSha256 },
+      },
+      include: {
+        fromUpdateFile: true,
+        toUpdateFile: { select: { sourceGroup: true } },
+      },
+    });
+    if (patchFile) await cacheSet(cacheKey, patchFile, 300);
+    return patchFile;
+  }
+
+  static async getPatchDownloadInfo(id: string) {
+    const patchFile = await this.getCachedPatchFile(id);
     if (!patchFile) return null;
     return {
-      filePath: storageService.getLocalPath(patchFile.s3Key),
-      fileName: `${patchFile.fromUpdateFile.sha256}_${patchFile.patchSha256.slice(0, 16)}.patch`,
+      filePath: storageService.getLocalPath((patchFile as any).s3Key as string),
+      fileName: `${(patchFile as any).fromUpdateFile?.sha256 ?? 'unknown'}_${(patchFile as any).patchSha256?.slice(0, 16) ?? 'unknown'}.patch`,
     };
   }
 
@@ -979,55 +1103,35 @@ export class UpdateService {
     oldSha256: string,
     newSha256: string,
   ) {
-    const patchFile = await prisma.patchFile.findFirst({
-      where: {
-        fromUpdateFile: { sha256: oldSha256 },
-        toUpdateFile: { sha256: newSha256 },
-      },
-      include: { fromUpdateFile: true },
-    });
+    const patchFile = await this.getCachedPatchFileBySha(oldSha256, newSha256);
     if (!patchFile) return null;
     return {
-      filePath: storageService.getLocalPath(patchFile.s3Key),
-      fileName: `${patchFile.fromUpdateFile.sha256}_${patchFile.patchSha256.slice(0, 16)}.patch`,
+      filePath: storageService.getLocalPath((patchFile as any).s3Key as string),
+      fileName: `${(patchFile as any).fromUpdateFile?.sha256 ?? oldSha256}_${(patchFile as any).patchSha256?.slice(0, 16) ?? 'unknown'}.patch`,
     };
   }
 
   static async getPatchS3UrlBySha256(oldSha256: string, newSha256: string) {
-    const patchFile = await prisma.patchFile.findFirst({
-      where: {
-        fromUpdateFile: { sha256: oldSha256 },
-        toUpdateFile: { sha256: newSha256 },
-      },
-      select: { s3Url: true },
-    });
-    return patchFile?.s3Url || null;
+    const patchFile = await this.getCachedPatchFileBySha(oldSha256, newSha256);
+    if (!patchFile) return null;
+    return (patchFile as any).s3Url as string || null;
   }
 
   static async getPatchRedirectUrlBySha256(
     oldSha256: string,
     newSha256: string,
   ): Promise<string | null> {
-    const patchFile = await prisma.patchFile.findFirst({
-      where: {
-        fromUpdateFile: { sha256: oldSha256 },
-        toUpdateFile: { sha256: newSha256 },
-      },
-      include: {
-        fromUpdateFile: { select: { sourceGroup: true } },
-        toUpdateFile: { select: { sourceGroup: true } },
-      },
-    });
+    const patchFile = await this.getCachedPatchFileBySha(oldSha256, newSha256);
     if (!patchFile) return null;
 
     const groupName =
-      patchFile.toUpdateFile.sourceGroup ??
-      patchFile.fromUpdateFile.sourceGroup;
+      (patchFile as any).toUpdateFile?.sourceGroup ??
+      (patchFile as any).fromUpdateFile?.sourceGroup;
     if (groupName) {
       const filename = `${oldSha256}_${newSha256}.patch`;
       const mirrorUrls = await ReleaseSourceService.getPatchDownloadUrls(
         filename,
-        groupName,
+        groupName as string,
       );
       if (mirrorUrls.length > 0) {
         return (
@@ -1036,15 +1140,65 @@ export class UpdateService {
       }
     }
 
-    if (patchFile.s3Url.startsWith("http")) {
-      return patchFile.s3Url;
+    const s3Url = (patchFile as any).s3Url as string;
+    if (s3Url.startsWith("http")) {
+      return s3Url;
     }
 
     const { API_URL } = process.env;
-    if (API_URL && patchFile.s3Url.startsWith("/")) {
-      return `${API_URL.replace(/\/+$/, "")}${patchFile.s3Url}`;
+    if (API_URL && s3Url.startsWith("/")) {
+      return `${API_URL.replace(/\/+$/, "")}${s3Url}`;
     }
 
     return null;
+  }
+
+  /**
+   * Fix 1: Combined method — one DB lookup, returns both redirect URL and local fallback info.
+   */
+  static async getPatchDownloadInfoCombined(
+    oldSha256: string,
+    newSha256: string,
+  ): Promise<{
+    redirectUrl: string | null;
+    filePath: string;
+    fileName: string;
+  } | null> {
+    const patchFile = await this.getCachedPatchFileBySha(oldSha256, newSha256);
+    if (!patchFile) return null;
+
+    const p = patchFile as any;
+    let redirectUrl: string | null = null;
+
+    const groupName =
+      p.toUpdateFile?.sourceGroup ?? p.fromUpdateFile?.sourceGroup;
+    if (groupName) {
+      const filename = `${oldSha256}_${newSha256}.patch`;
+      const mirrorUrls = await ReleaseSourceService.getPatchDownloadUrls(
+        filename,
+        groupName as string,
+      );
+      if (mirrorUrls.length > 0) {
+        redirectUrl = mirrorUrls[Math.floor(Math.random() * mirrorUrls.length)] ?? null;
+      }
+    }
+
+    if (!redirectUrl) {
+      const s3Url = p.s3Url as string;
+      if (s3Url.startsWith("http")) {
+        redirectUrl = s3Url;
+      } else {
+        const { API_URL } = process.env;
+        if (API_URL && s3Url.startsWith("/")) {
+          redirectUrl = `${API_URL.replace(/\/+$/, "")}${s3Url}`;
+        }
+      }
+    }
+
+    return {
+      redirectUrl,
+      filePath: storageService.getLocalPath(p.s3Key as string),
+      fileName: `${p.fromUpdateFile?.sha256 ?? oldSha256}_${(p.patchSha256 as string)?.slice(0, 16) ?? 'unknown'}.patch`,
+    };
   }
 }

@@ -93,25 +93,24 @@ export const updateRoutes = new Elysia({ prefix: '/apiv2' })
     }
 
     try {
-      const redirectUrl = await UpdateService.getUpdateRedirectUrl(params.id)
-      if (redirectUrl) {
-        return Response.redirect(redirectUrl, 302)
-      }
-
-      const { filePath, sha256 } = (await UpdateService.getUpdateDownloadPathAndSha(params.id)) ?? {};
-      if (!filePath || !sha256) {
+      const info = await UpdateService.getUpdateDownloadInfo(params.id)
+      if (!info) {
         set.status = 404
         return { success: false, error: '更新文件不存在' }
       }
 
-      const file = Bun.file(filePath)
+      if (info.redirectUrl) {
+        return Response.redirect(info.redirectUrl, 302)
+      }
+
+      const file = Bun.file(info.filePath)
       if (!(await file.exists())) {
         set.status = 404
         return { success: false, error: '更新文件不存在' }
       }
 
       set.headers['content-type'] = 'application/zip'
-      set.headers['content-disposition'] = `attachment; filename="${sha256}.zip"`
+      set.headers['content-disposition'] = `attachment; filename="${info.sha256}.zip"`
       return new Response(file)
     } catch (error) {
       console.error('下载更新文件失败:', error)
@@ -186,25 +185,24 @@ export const staticRoutes = new Elysia()
         return { success: false, error: '文件名格式错误' }
       }
 
-      const redirectUrl = await UpdateService.getPatchRedirectUrlBySha256(oldSha256, newSha256)
-      if (redirectUrl) {
-        return Response.redirect(redirectUrl, 302)
-      }
-
-      const patchInfo = await UpdateService.getPatchDownloadInfoBySha256(oldSha256, newSha256)
-      if (!patchInfo || !patchInfo.filePath) {
+      const info = await UpdateService.getPatchDownloadInfoCombined(oldSha256, newSha256)
+      if (!info || !info.filePath) {
         set.status = 404
         return { success: false, error: '补丁文件不存在' }
       }
 
-      const file = Bun.file(patchInfo.filePath)
+      if (info.redirectUrl) {
+        return Response.redirect(info.redirectUrl, 302)
+      }
+
+      const file = Bun.file(info.filePath)
       if (!(await file.exists())) {
         set.status = 404
         return { success: false, error: '补丁文件不存在' }
       }
 
       set.headers['content-type'] = 'application/octet-stream'
-      set.headers['content-disposition'] = `attachment; filename="${patchInfo.fileName}"`
+      set.headers['content-disposition'] = `attachment; filename="${info.fileName}"`
       return new Response(file)
     } catch (error) {
       console.error('获取补丁下载地址失败:', error)
