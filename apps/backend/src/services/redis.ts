@@ -41,6 +41,13 @@ export const CacheKeys = {
   channelPattern: `${CACHE_PREFIX}updates:channel:*`,
   allPattern: `${CACHE_PREFIX}updates:all*`,
   cachePattern: `${CACHE_PREFIX}cache:*`,
+  // Individual record caches (Fix 2)
+  updateFile: (id: string) => `${CACHE_PREFIX}updateFile:${id}`,
+  patchFile: (id: string) => `${CACHE_PREFIX}patchFile:${id}`,
+  patchFileBySha: (oldSha256: string, newSha256: string) =>
+    `${CACHE_PREFIX}patchFile:${oldSha256}:${newSha256}`,
+  releaseSourceGroup: (groupName: string) =>
+    `${CACHE_PREFIX}releaseSource:${groupName}`,
 } as const
 
 export async function cacheGet<T>(key: string): Promise<T | null> {
@@ -86,6 +93,22 @@ export async function invalidateAllCache(): Promise<void> {
   } catch (error) {
     console.error('[Redis] invalidateAllCache error:', error)
   }
+}
+
+export async function invalidateUpdateFileCache(id: string): Promise<void> {
+  await cacheDel(CacheKeys.updateFile(id))
+}
+
+export async function invalidatePatchFileCache(id: string): Promise<void> {
+  await cacheDel(CacheKeys.patchFile(id))
+}
+
+export async function invalidatePatchFileByShaCache(oldSha256: string, newSha256: string): Promise<void> {
+  await cacheDel(CacheKeys.patchFileBySha(oldSha256, newSha256))
+}
+
+export async function invalidateReleaseSourceCache(groupName: string): Promise<void> {
+  await cacheDel(CacheKeys.releaseSourceGroup(groupName))
 }
 
 export async function invalidateAnnouncementsCache(): Promise<void> {
