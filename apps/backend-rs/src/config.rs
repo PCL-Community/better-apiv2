@@ -1,5 +1,7 @@
 use std::env;
 
+use anyhow::{Context, Result};
+
 #[derive(Clone, Debug)]
 pub struct Config {
     pub database_url: String,
@@ -37,27 +39,27 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn from_env() -> Self {
-        Self {
+    pub fn from_env() -> Result<Self> {
+        Ok(Self {
             database_url: env::var("DATABASE_URL")
-                .expect("DATABASE_URL must be set"),
+                .context("DATABASE_URL must be set")?,
             redis_url: env::var("REDIS_URL")
                 .unwrap_or_else(|_| "redis://localhost:6379".to_string()),
             port: env::var("PORT")
                 .unwrap_or_else(|_| "3000".to_string())
                 .parse()
-                .expect("PORT must be a number"),
+                .context("PORT must be a number")?,
             cors_origin: env::var("CORS_ORIGIN")
                 .unwrap_or_else(|_| "*".to_string()),
             node_env: env::var("NODE_ENV")
                 .unwrap_or_else(|_| "development".to_string()),
 
             github_client_id: env::var("GITHUB_CLIENT_ID")
-                .expect("GITHUB_CLIENT_ID must be set"),
+                .context("GITHUB_CLIENT_ID must be set")?,
             github_client_secret: env::var("GITHUB_CLIENT_SECRET")
-                .expect("GITHUB_CLIENT_SECRET must be set"),
+                .context("GITHUB_CLIENT_SECRET must be set")?,
             github_redirect_uri: env::var("GITHUB_REDIRECT_URI")
-                .expect("GITHUB_REDIRECT_URI must be set"),
+                .context("GITHUB_REDIRECT_URI must be set")?,
             github_org: env::var("GITHUB_ORG")
                 .unwrap_or_else(|_| "PCL-Community".to_string()),
             github_team_slug: env::var("GITHUB_TEAM_SLUG")
@@ -67,7 +69,7 @@ impl Config {
             admin_session_ttl_hours: env::var("ADMIN_SESSION_TTL_HOURS")
                 .unwrap_or_else(|_| "24".to_string())
                 .parse()
-                .expect("ADMIN_SESSION_TTL_HOURS must be a number"),
+                .context("ADMIN_SESSION_TTL_HOURS must be a number")?,
 
             storage_provider: env::var("STORAGE_PROVIDER")
                 .unwrap_or_else(|_| "local".to_string()),
@@ -86,11 +88,11 @@ impl Config {
             patch_concurrency: env::var("PATCH_CONCURRENCY")
                 .unwrap_or_else(|_| "2".to_string())
                 .parse()
-                .expect("PATCH_CONCURRENCY must be a number"),
+                .context("PATCH_CONCURRENCY must be a number")?,
             bsdiff_command: env::var("BSDIFF_COMMAND")
                 .unwrap_or_else(|_| "bsdiff".to_string()),
             bspatch_command: env::var("BSPATCH_COMMAND")
                 .unwrap_or_else(|_| "bspatch".to_string()),
-        }
+        })
     }
 }

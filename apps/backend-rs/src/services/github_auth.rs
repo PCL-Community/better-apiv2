@@ -31,9 +31,9 @@ pub struct GitHubAuth {
 impl GitHubAuth {
     pub fn new(cfg: &Config) -> Self {
         let client = if let Some(proxy_url) = &cfg.github_proxy {
-            Client::builder()
-                .proxy(reqwest::Proxy::all(proxy_url).unwrap())
-                .build()
+            reqwest::Proxy::all(proxy_url)
+                .ok()
+                .and_then(|proxy| Client::builder().proxy(proxy).build().ok())
                 .unwrap_or_default()
         } else {
             Client::new()
@@ -93,9 +93,7 @@ impl GitHubAuth {
     pub async fn is_team_member(&self, token: &str) -> Result<bool, String> {
         let org = &self.cfg.github_org;
         let slug = &self.cfg.github_team_slug;
-        let url = format!(
-            "https://api.github.com/orgs/{org}/teams/{slug}/memberships/@@me"
-        );
+        let url = format!("https://api.github.com/orgs/{org}/teams/{slug}/memberships/@@me");
 
         let resp = self
             .client

@@ -1,17 +1,25 @@
+use anyhow::Context;
+
 use better_apiv2::{build_router, config::Config, db::AppState, setup_tracing};
 
 #[tokio::main]
 async fn main() {
+    if let Err(e) = run().await {
+        println!("Error: {e}");
+    }
+}
+
+async fn run() -> anyhow::Result<()> {
     setup_tracing();
 
     dotenvy::dotenv().ok();
 
-    let cfg = Config::from_env();
+    let cfg = Config::from_env().context("failed to load configuration")?;
     let port = cfg.port;
 
     let state = AppState::new(cfg)
         .await
-        .expect("failed to initialize app state");
+        .context("failed to initialize app state")?;
 
     let app = build_router(state);
 
@@ -20,9 +28,9 @@ async fn main() {
 
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
-        .expect("failed to bind");
+        .context("failed to bind TCP listener")?;
 
-    axum::serve(listener, app)
-        .await
-        .expect("server error");
+    axum::serve(listener, app).await.context("server error")?;
+
+    Ok(())
 }
