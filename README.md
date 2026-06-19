@@ -1,6 +1,6 @@
 # Better APIv2
 
-PCL CE 的 APIv2 实现,使用 ElysiaJS、TypeScript 和 Prisma 重新构建。
+PCL CE 的 APIv2 实现，使用 ElysiaJS、TypeScript 和 Prisma 重新构建。
 
 > 由于我没有使用 Elysiajs 和 Bun 的开发经验，因此后端代码全部为 vibe-coding 得到。_REVIEW REQUIRED_
 

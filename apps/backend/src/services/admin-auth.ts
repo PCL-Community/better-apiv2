@@ -112,6 +112,44 @@ export class AdminAuthService {
     }
   }
 
+  static async validatePat(pat: string) {
+    if (!pat) {
+      throw new UnauthorizedError('Missing access token')
+    }
+
+    const profile = await fetchGithubUserProfile(pat)
+    const isTeamMember = await checkGithubTeamMembership(pat, profile.login)
+
+    const user = await prisma.adminUser.upsert({
+      where: { githubId: String(profile.id) },
+      update: {
+        login: profile.login,
+        name: profile.name,
+        avatarUrl: profile.avatar_url,
+        isTeamMember,
+      },
+      create: {
+        githubId: String(profile.id),
+        login: profile.login,
+        name: profile.name,
+        avatarUrl: profile.avatar_url,
+        isTeamMember,
+      },
+    })
+
+    if (!isTeamMember) {
+      throw new ForbiddenError(`Only ${getTeamDescription()} members can use admin API`)
+    }
+
+    return {
+      id: user.id,
+      githubId: user.githubId,
+      login: user.login,
+      name: user.name,
+      avatarUrl: user.avatarUrl,
+    }
+  }
+
   static async logout(token: string) {
     await prisma.adminSession.deleteMany({
       where: { token },
