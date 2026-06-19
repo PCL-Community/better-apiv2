@@ -136,53 +136,6 @@ export const updateRoutes = new Elysia({ prefix: '/apiv2' })
       return { success: false, error: '获取下载地址失败' }
     }
   })
-  .get('/updates/:id/patches/:patchId/download', async ({ params, set, request }) => {
-    const clientIp = getClientIp(request)
-    const rateCheck = publicRateLimiter(clientIp)
-    if (!rateCheck.allowed) {
-      set.status = 429
-      return { success: false, error: '请求过于频繁' }
-    }
-
-    try {
-      const patchInfo = await UpdateService.getPatchDownloadInfo(params.patchId)
-      if (!patchInfo || !patchInfo.filePath) {
-        set.status = 404
-        return { success: false, error: '补丁文件不存在' }
-      }
-
-      const file = Bun.file(patchInfo.filePath)
-      if (!(await file.exists())) {
-        set.status = 404
-        return { success: false, error: '补丁文件不存在' }
-      }
-
-      set.headers['content-type'] = 'application/octet-stream'
-      set.headers['content-disposition'] = `attachment; filename="${patchInfo.fileName}"`
-      return new Response(file)
-    } catch (error) {
-      console.error('下载补丁文件失败:', error)
-      set.status = 500
-      return { success: false, error: '下载补丁文件失败' }
-    }
-  })
-  .get('/updates/:id', async ({ params, set, request }) => {
-    const clientIp = getClientIp(request)
-    const rateCheck = publicRateLimiter(clientIp)
-    if (!rateCheck.allowed) return { assets: [] }
-
-    try {
-      const channel = parseChannelFromPathSegment(params.id)
-      if (!channel) {
-        set.status = 404
-        return { assets: [] }
-      }
-      return await UpdateService.getUpdatesByChannel(channel, getBaseUrl(request))
-    } catch (error) {
-      console.error('获取更新失败:', error)
-      return { assets: [] }
-    }
-  })
 
 export const staticRoutes = new Elysia()
   .get('/static/patch/:filename', async ({ params, set, request }) => {
