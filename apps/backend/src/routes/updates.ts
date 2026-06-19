@@ -85,6 +85,23 @@ export const updateRoutes = new Elysia({ prefix: '/apiv2' })
       return { assets: [] }
     }
   })
+  .get('/updates/:id', async ({ params, set, request }) => {
+    const clientIp = getClientIp(request)
+    const rateCheck = publicRateLimiter(clientIp)
+    if (!rateCheck.allowed) return { assets: [] }
+
+    try {
+      const channel = parseChannelFromPathSegment(params.id)
+      if (!channel) {
+        set.status = 404
+        return { assets: [] }
+      }
+      return await UpdateService.getUpdatesByChannel(channel, getBaseUrl(request))
+    } catch (error) {
+      console.error('获取更新失败:', error)
+      return { assets: [] }
+    }
+  })
   .get('/updates', async ({ query, request }: { query?: Record<string, string>, request: Request }) => {
     const clientIp = getClientIp(request)
     const rateCheck = publicRateLimiter(clientIp)
