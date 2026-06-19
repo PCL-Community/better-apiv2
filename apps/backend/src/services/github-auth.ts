@@ -28,6 +28,11 @@ async function githubFetch(input: string, init: RequestInit = {}) {
   return fetch(input, init)
 }
 
+export function getTeamSlugs(): string[] {
+  const raw = process.env.GITHUB_TEAM_SLUG || 'ce-dev'
+  return raw.split(',').map(s => s.trim()).filter(Boolean)
+}
+
 export function getGithubOAuthLoginUrl(state: string): string {
   const clientId = getRequiredEnv('GITHUB_CLIENT_ID')
   const redirectUri = getRequiredEnv('GITHUB_REDIRECT_URI')
@@ -93,31 +98,33 @@ export async function fetchGithubUserProfile(accessToken: string): Promise<Githu
 
 export async function checkGithubTeamMembership(accessToken: string, login?: string): Promise<boolean> {
   const org = process.env.GITHUB_ORG || 'PCL-Community'
-  const teamSlug = process.env.GITHUB_TEAM_SLUG || 'ce-dev'
+  const teamSlugs = getTeamSlugs()
   const userLogin = login ?? (await fetchGithubUserProfile(accessToken)).login
 
-  const response = await githubFetch(
-    `${GITHUB_API_BASE}/orgs/${encodeURIComponent(org)}/teams/${encodeURIComponent(teamSlug)}/memberships/${encodeURIComponent(userLogin)}`,
-    {
-      headers: {
-        Accept: 'application/vnd.github+json',
-        Authorization: `Bearer ${accessToken}`,
-        'X-GitHub-Api-Version': '2022-11-28',
-      },
+  for (const teamSlug of teamSlugs) {
+    const response = await githubFetch(
+      `${GITHUB_API_BASE}/orgs/${encodeURIComponent(org)}/teams/${encodeURIComponent(teamSlug)}/memberships/${encodeURIComponent(userLogin)}`,
+      {
+        headers: {
+          Accept: 'application/vnd.github+json',
+          Authorization: `Bearer ${accessToken}`,
+          'X-GitHub-Api-Version': '2022-11-28',
+        },
+      }
+    )
+
+    if (response.status === 404) continue
+
+    if (!response.ok) {
+      const text = await response.text()
+      throw new Error(`Failed to check GitHub team membership: ${response.status} ${text}`)
     }
-  )
 
-  if (response.status === 404) {
-    return false
+    const membership = (await response.json()) as { state?: string }
+    if (membership.state === 'active') return true
   }
 
-  if (!response.ok) {
-    const text = await response.text()
-    throw new Error(`Failed to check GitHub team membership: ${response.status} ${text}`)
-  }
-
-  const membership = (await response.json()) as { state?: string }
-  return membership.state === 'active'
+  return false
 }
 
 export async function storeOAuthState(state: string): Promise<void> {

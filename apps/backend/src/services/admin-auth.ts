@@ -3,6 +3,7 @@ import {
   checkGithubTeamMembership,
   exchangeCodeForAccessToken,
   fetchGithubUserProfile,
+  getTeamSlugs,
 } from './github-auth'
 
 const DEFAULT_SESSION_TTL_HOURS = 24
@@ -14,6 +15,12 @@ function getSessionTtlHours(): number {
   const parsed = Number(raw)
   if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_SESSION_TTL_HOURS
   return parsed
+}
+
+function getTeamDescription(): string {
+  const org = process.env.GITHUB_ORG || 'PCL-Community'
+  const slugs = getTeamSlugs()
+  return `${org}/${slugs.join(', ')}`
 }
 
 export class ForbiddenError extends Error {}
@@ -43,7 +50,7 @@ export class AdminAuthService {
     })
 
     if (!isTeamMember) {
-      throw new ForbiddenError('Only PCL-Community/ce-dev members can use admin API')
+      throw new ForbiddenError(`Only ${getTeamDescription()} members can use admin API`)
     }
 
     const token = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '')
@@ -92,7 +99,7 @@ export class AdminAuthService {
     }
 
     if (!session.user.isTeamMember) {
-      throw new ForbiddenError('User is not a PCL-Community/ce-dev member')
+      throw new ForbiddenError(`User is not a ${getTeamDescription()} member`)
     }
 
     return {
